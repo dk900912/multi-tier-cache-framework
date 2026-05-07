@@ -1,0 +1,116 @@
+package io.github.dk900912.multitiercache.provider.guava;
+
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheStats;
+import io.github.dk900912.multitiercache.api.CacheKey;
+import io.github.dk900912.multitiercache.api.model.CacheConfig;
+import io.github.dk900912.multitiercache.api.model.L1CacheStats;
+import io.github.dk900912.multitiercache.spi.L1Provider;
+
+import java.time.Duration;
+
+/**
+ * Level 1 (L1) cache provider implementation based on Google Guava Cache.
+ *
+ * @author dukui
+ */
+public class GuavaL1Provider implements L1Provider {
+
+    private Cache<String, Object> cache;
+    private boolean recordStats;
+
+    public GuavaL1Provider() {
+    }
+
+    public GuavaL1Provider(Long maximumSize,
+                           Duration expireAfterWrite,
+                           Duration expireAfterAccess,
+                           boolean recordStats) {
+        initialize(maximumSize, expireAfterWrite, expireAfterAccess, recordStats);
+    }
+
+    @Override
+    public void initialize(CacheConfig.L1Config config) {
+        initialize(
+                config.getMaximumSize(),
+                config.getExpireAfterWrite(),
+                config.getExpireAfterAccess(),
+                config.isRecordStats()
+        );
+    }
+
+    private void initialize(Long maximumSize,
+                            Duration expireAfterWrite,
+                            Duration expireAfterAccess,
+                            boolean recordStats) {
+        CacheBuilder<Object, Object> builder = CacheBuilder.newBuilder();
+        if (maximumSize != null) {
+            builder.maximumSize(maximumSize);
+        }
+        if (expireAfterWrite != null) {
+            builder.expireAfterWrite(expireAfterWrite);
+        }
+        if (expireAfterAccess != null) {
+            builder.expireAfterAccess(expireAfterAccess);
+        }
+        if (recordStats) {
+            builder.recordStats();
+        }
+        this.recordStats = recordStats;
+        this.cache = builder.build();
+    }
+
+    @Override
+    public Object get(CacheKey key) {
+        ensureInitialized();
+        return cache.getIfPresent(key.toRedisKey());
+    }
+
+    @Override
+    public void put(CacheKey key, Object value) {
+        ensureInitialized();
+        cache.put(key.toRedisKey(), value);
+    }
+
+    @Override
+    public void invalidate(CacheKey key) {
+        ensureInitialized();
+        cache.invalidate(key.toRedisKey());
+    }
+
+    @Override
+    public void clear() {
+        ensureInitialized();
+        cache.invalidateAll();
+    }
+
+    @Override
+    public L1CacheStats getStats() {
+        ensureInitialized();
+        if (!recordStats) {
+            throw new IllegalStateException("Guava recordStats is disabled");
+        }
+        CacheStats stats = cache.stats();
+        L1CacheStats snapshot = new L1CacheStats();
+        snapshot.setRequestCount(stats.requestCount());
+        snapshot.setHitCount(stats.hitCount());
+        snapshot.setHitRate(stats.hitRate());
+        snapshot.setMissCount(stats.missCount());
+        snapshot.setMissRate(stats.missRate());
+        snapshot.setLoadCount(stats.loadCount());
+        snapshot.setLoadSuccessCount(stats.loadSuccessCount());
+        snapshot.setLoadFailureCount(stats.loadExceptionCount());
+        snapshot.setLoadFailureRate(stats.loadExceptionRate());
+        snapshot.setTotalLoadTime(stats.totalLoadTime());
+        snapshot.setAverageLoadPenalty(stats.averageLoadPenalty());
+        snapshot.setEvictionCount(stats.evictionCount());
+        return snapshot;
+    }
+
+    private void ensureInitialized() {
+        if (cache == null) {
+            throw new IllegalStateException("Guava L1 provider is not initialized");
+        }
+    }
+}
