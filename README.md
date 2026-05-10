@@ -1,5 +1,18 @@
 # 多级缓存框架 (Multi-Tier Cache Framework)
 
+![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square&logo=openjdk&logoColor=white)
+![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
+![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
+![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
+
+![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
+![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square&logo=google&logoColor=white)
+![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square&logo=openjdk&logoColor=white)
+![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square&logo=redis&logoColor=white)
+![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
+![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square&logo=redis&logoColor=white)
+
 一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。
 
 ## 1. 接入指南 (Introduction & Integration Guide)
@@ -633,10 +646,3 @@ sequenceDiagram
 如果您确实有极高的一致性要求或 DB 极为脆弱，完全可以在您实现的 `CacheLoader.load()` 逻辑中，自行包裹一层分布式锁（例如 Redisson Lock）。由于框架层已经做好了第一道防线（单机 SingleFlight），这会带来一个极大的架构优势：**分布式锁的竞争压力会被成百上千倍地削弱！**
 
 在洪峰到来时，无论有多少并发请求，每个 JVM 节点最多只会有一个线程去竞争分布式锁。
-
-**最佳实践伪代码：**
-1. 框架单机 SingleFlight 拦截了 99.9% 的并发线程。
-2. 少数代表各个节点的线程进入您的 `CacheLoader.load()`。
-3. 尝试获取分布式锁。
-4. **获取锁成功后，务必进行 Double-Check（再次直接查询一次 L2 缓存）**，因为在等待锁的期间，其他节点可能已经完成了查询并将数据回填到了 L2。
-5. 若 L2 依然为空，再执行真正的 DB 回源查询。
