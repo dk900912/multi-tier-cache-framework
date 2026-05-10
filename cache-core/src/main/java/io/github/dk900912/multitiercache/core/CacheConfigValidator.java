@@ -38,10 +38,9 @@ final class CacheConfigValidator {
         validateCacheMiss(cacheMiss);
     }
 
-    static void validateResolvedProviders(CacheConfig cacheConfig, L1Provider l1Provider, L2Provider l2Provider) {
+    static void validateResolvedL1Provider(CacheConfig cacheConfig, L1Provider l1Provider) {
         Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
         Objects.requireNonNull(l1Provider, "L1Provider cannot be null");
-        Objects.requireNonNull(l2Provider, "L2Provider cannot be null");
 
         CacheConfig.L1Config l1 = cacheConfig.getL1();
         if (l1 != null && l1.isRecordStats() && isProvider(l1Provider, "jdk")) {
@@ -50,6 +49,11 @@ final class CacheConfigValidator {
         if (l1 != null && l1.getFineGrainedExpiry() != null && !isProvider(l1Provider, "caffeine")) {
             throw new IllegalArgumentException("fineGrainedExpiry requires the Caffeine L1 provider");
         }
+    }
+
+    static void validateResolvedL2Provider(CacheConfig cacheConfig, L2Provider l2Provider) {
+        Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
+        Objects.requireNonNull(l2Provider, "L2Provider cannot be null");
     }
 
     private static void validateL1(CacheConfig.L1Config l1) {

@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -30,6 +31,9 @@ public final class CacheMessageReplayer implements LifecycleManager {
     private final CacheMutationProcessor mutationProcessor;
     private final CacheConfig cacheConfig;
     private final ScheduledExecutorService scheduler;
+    private final LifecycleStateMachine lifecycleStateMachine = new LifecycleStateMachine("Compensation task");
+
+    private volatile ScheduledFuture<?> compensationTask;
 
     public CacheMessageReplayer(CacheMessageRepository cacheMessageRepository,
                                 CacheMutationProcessor mutationProcessor,
@@ -43,17 +47,38 @@ public final class CacheMessageReplayer implements LifecycleManager {
 
     @Override
     public void bootstrap() {
-        scheduler.scheduleAtFixedRate(
-                this::compensate,
-                cacheConfig.getCompensation().getInitialDelay().toMillis(),
-                cacheConfig.getCompensation().getPeriod().toMillis(),
-                TimeUnit.MILLISECONDS
-        );
-        LOGGER.info("Compensation task started.");
+        if (!lifecycleStateMachine.beginBootstrap()) {
+            return;
+        }
+
+        try {
+            compensationTask = scheduler.scheduleAtFixedRate(
+                    this::compensate,
+                    cacheConfig.getCompensation().getInitialDelay().toMillis(),
+                    cacheConfig.getCompensation().getPeriod().toMillis(),
+                    TimeUnit.MILLISECONDS
+            );
+            lifecycleStateMachine.markStarted();
+            LOGGER.info("Compensation task started.");
+        } catch (Exception e) {
+            compensationTask = null;
+            lifecycleStateMachine.markBootstrapFailed();
+            throw e;
+        }
     }
 
     @Override
     public void shutdown() {
+        if (!lifecycleStateMachine.beginShutdown()) {
+            return;
+        }
+
+        ScheduledFuture<?> currentTask = compensationTask;
+        compensationTask = null;
+        if (currentTask != null) {
+            currentTask.cancel(false);
+        }
+
         scheduler.shutdown();
         try {
             if (!scheduler.awaitTermination(3, TimeUnit.SECONDS)) {

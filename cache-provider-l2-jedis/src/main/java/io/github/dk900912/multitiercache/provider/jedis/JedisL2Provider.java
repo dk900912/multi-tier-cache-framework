@@ -217,7 +217,19 @@ public class JedisL2Provider implements L2Provider, AutoCloseable {
         activePubSubs.clear();
 
         if (pubSubExecutor != null && !pubSubExecutor.isShutdown()) {
-            pubSubExecutor.shutdownNow();
+            try {
+                pubSubExecutor.shutdownNow();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to shut down Jedis pub/sub executor", e);
+            }
+        }
+
+        if (redisClient != null) {
+            try {
+                redisClient.close();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to close Jedis redis client", e);
+            }
         }
     }
 

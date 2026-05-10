@@ -1,15 +1,11 @@
 package io.github.dk900912.multitiercache.core;
 
 import io.github.dk900912.multitiercache.api.CacheKey;
-import io.github.dk900912.multitiercache.api.CacheLoader;
 import io.github.dk900912.multitiercache.api.CacheManager;
 import io.github.dk900912.multitiercache.api.CacheMessageListener;
 import io.github.dk900912.multitiercache.api.CacheMessageRepository;
 import io.github.dk900912.multitiercache.api.CacheMessageSubscription;
-import io.github.dk900912.multitiercache.api.CacheMonitor;
-import io.github.dk900912.multitiercache.api.LifecycleManager;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
-import io.github.dk900912.multitiercache.api.model.CacheMessage;
 import io.github.dk900912.multitiercache.codec.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
 import io.github.dk900912.multitiercache.spi.L2Provider;
@@ -23,7 +19,7 @@ import java.util.List;
 import java.util.ServiceLoader;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Supplier;
+
 
 /**
  * Factory for creating and configuring CacheManager instances.
@@ -44,7 +40,6 @@ public class CacheManagerFactory {
         L1Provider l1Provider = createL1Provider(cacheConfig);
         L2Provider l2Provider = createL2Provider(cacheConfig);
         CacheMessageRepository cacheMessageRepository = createCacheMessageRepository();
-        CacheConfigValidator.validateResolvedProviders(cacheConfig, l1Provider, l2Provider);
 
         CacheCodec cacheCodec = new CacheCodec();
         SingleFlight singleFlight = new SingleFlight();
@@ -81,6 +76,7 @@ public class CacheManagerFactory {
                         .comparingInt(CacheManagerFactory::l1Priority)
                         .thenComparing(p -> p.getClass().getName()))
                 .orElseThrow();
+        CacheConfigValidator.validateResolvedL1Provider(cacheConfig, provider);
         initializeL1Provider(provider, l1Config);
         LOGGER.info("Selected L1Provider: {}", provider.getClass().getName());
         return provider;
@@ -103,6 +99,7 @@ public class CacheManagerFactory {
                         .comparingInt(CacheManagerFactory::l2Priority)
                         .thenComparing(p -> p.getClass().getName()))
                 .orElseThrow();
+        CacheConfigValidator.validateResolvedL2Provider(cacheConfig, provider);
         initializeL2Provider(provider, l2Config);
         LOGGER.info("Selected L2Provider: {}", provider.getClass().getName());
         return provider;
@@ -221,73 +218,6 @@ public class CacheManagerFactory {
         @Override
         public Object eval(String script, List<String> keys, List<String> args) {
             throw new UnsupportedOperationException("L2 cache is disabled");
-        }
-    }
-
-    private static class LifecycleAwareCacheManager implements CacheManager {
-
-        private final CacheManager delegate;
-        private final LifecycleManager[] lifecycleManagers;
-
-        public LifecycleAwareCacheManager(CacheManager delegate, LifecycleManager... lifecycleManagers) {
-            this.delegate = delegate;
-            this.lifecycleManagers = lifecycleManagers;
-        }
-
-        @Override
-        public <T> T get(CacheKey key, Supplier<T> loader) {
-            return delegate.get(key, loader);
-        }
-
-        @Override
-        public <T> T get(CacheKey key, Supplier<T> loader, Duration ttl) {
-            return delegate.get(key, loader, ttl);
-        }
-
-        @Override
-        public <T> T get(CacheKey key, CacheLoader<T> loader) {
-            return delegate.get(key, loader);
-        }
-
-        @Override
-        public void insert(CacheKey key, Object data, Long version, Duration ttl) {
-            delegate.insert(key, data, version, ttl);
-        }
-
-        @Override
-        public void update(CacheKey key, Object data, Long version, Duration ttl) {
-            delegate.update(key, data, version, ttl);
-        }
-
-        @Override
-        public void evict(CacheKey key, Long version, Duration ttl) {
-            delegate.evict(key, version, ttl);
-        }
-
-        @Override
-        public CacheMonitor getMonitor() {
-            return delegate.getMonitor();
-        }
-
-        @Override
-        public void apply(CacheMessage<?> message) {
-            delegate.apply(message);
-        }
-
-        @Override
-        public void bootstrap() {
-            delegate.bootstrap();
-            for (LifecycleManager lm : lifecycleManagers) {
-                lm.bootstrap();
-            }
-        }
-
-        @Override
-        public void shutdown() {
-            for (LifecycleManager lm : lifecycleManagers) {
-                lm.shutdown();
-            }
-            delegate.shutdown();
         }
     }
 }

@@ -22,8 +22,10 @@ class CacheConfigValidatorTest {
         CacheConfig config = validConfig();
 
         assertDoesNotThrow(() -> CacheConfigValidator.validateBase(config));
-        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedProviders(
-                config, new CaffeineStyleL1Provider(), new NoopL2Provider()));
+        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedL1Provider(
+                config, new CaffeineStyleL1Provider()));
+        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new NoopL2Provider()));
     }
 
     @Test
@@ -72,8 +74,8 @@ class CacheConfigValidatorTest {
         CacheConfig config = validConfig();
         config.getL1().setRecordStats(true);
 
-        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedProviders(
-                config, new JdkStyleL1Provider(), new NoopL2Provider()));
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL1Provider(
+                config, new JdkStyleL1Provider()));
     }
 
     @Test
@@ -81,8 +83,8 @@ class CacheConfigValidatorTest {
         CacheConfig config = validConfig();
         config.getL1().setFineGrainedExpiry(new TestFineGrainedExpiry());
 
-        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedProviders(
-                config, new GuavaStyleL1Provider(), new NoopL2Provider()));
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL1Provider(
+                config, new GuavaStyleL1Provider()));
     }
 
     private static CacheConfig validConfig() {

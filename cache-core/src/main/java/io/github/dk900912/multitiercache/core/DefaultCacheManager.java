@@ -50,6 +50,7 @@ public class DefaultCacheManager implements CacheManager {
     private final CacheMessageRepository cacheMessageRepository;
 
     private final AtomicReference<CacheMessageSubscription> subscription = new AtomicReference<>();
+    private final LifecycleStateMachine lifecycleStateMachine = new LifecycleStateMachine("CacheManager");
 
     private final CacheCodec cacheCodec;
     private final SingleFlight singleFlight;
@@ -134,47 +135,57 @@ public class DefaultCacheManager implements CacheManager {
 
     @Override
     public void bootstrap() {
-        Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
-        if (!isL2Enabled()) {
+        if (!lifecycleStateMachine.beginBootstrap()) {
             return;
         }
-        Objects.requireNonNull(cacheConfig.getL2().getMutationChannelName(), "MutationChannelName cannot be null");
 
-        CacheMessageSubscription newSubscription = l2Provider.subscribe(
-                cacheConfig.getL2().getMutationChannelName(),
-                (receivedChannel, payload) -> {
-                    try {
-                        CacheMessage<?> message = cacheCodec.decodeMessage(payload, Object.class);
-                        CacheKey key = message::getKey;
-                        if (LOGGER.isDebugEnabled()) {
-                            LOGGER.debug("Invalidating L1 cache for key {} from pub/sub message", key.toRedisKey());
-                        }
-                        l1Provider.invalidate(key);
-                    } catch (Exception e) {
-                        LOGGER.warn("Ignoring malformed L1 invalidation message from channel {}", receivedChannel, e);
-                    }
-                });
-
-        CacheMessageSubscription oldSubscription = this.subscription.getAndSet(newSubscription);
-        if (oldSubscription != null) {
-            try {
-                oldSubscription.close();
-            } catch (Exception e) {
-                LOGGER.warn("Failed to close previous cache message subscription", e);
+        try {
+            Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
+            if (!isL2Enabled()) {
+                lifecycleStateMachine.markStarted();
+                return;
             }
+            Objects.requireNonNull(cacheConfig.getL2().getMutationChannelName(), "MutationChannelName cannot be null");
+
+            CacheMessageSubscription newSubscription = l2Provider.subscribe(
+                    cacheConfig.getL2().getMutationChannelName(),
+                    (receivedChannel, payload) -> {
+                        try {
+                            CacheMessage<?> message = cacheCodec.decodeMessage(payload, Object.class);
+                            CacheKey key = message::getKey;
+                            if (LOGGER.isDebugEnabled()) {
+                                LOGGER.debug("Invalidating L1 cache for key {} from pub/sub message", key.toRedisKey());
+                            }
+                            l1Provider.invalidate(key);
+                        } catch (Exception e) {
+                            LOGGER.warn("Ignoring malformed L1 invalidation message from channel {}", receivedChannel, e);
+                        }
+                    });
+
+            CacheMessageSubscription oldSubscription = this.subscription.getAndSet(newSubscription);
+            if (oldSubscription != null) {
+                try {
+                    oldSubscription.close();
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to close previous cache message subscription", e);
+                }
+            }
+            lifecycleStateMachine.markStarted();
+        } catch (Exception e) {
+            closeSubscription(subscription.getAndSet(null), "Failed to close cache message subscription after bootstrap failure");
+            lifecycleStateMachine.markBootstrapFailed();
+            throw e;
         }
     }
 
     @Override
     public void shutdown() {
-        CacheMessageSubscription currentSubscription = subscription.getAndSet(null);
-        if (currentSubscription != null) {
-            try {
-                currentSubscription.close();
-            } catch (Exception e) {
-                LOGGER.warn("Failed to close cache message subscription during shutdown", e);
-            }
+        if (!lifecycleStateMachine.beginShutdown()) {
+            return;
         }
+
+        CacheMessageSubscription currentSubscription = subscription.getAndSet(null);
+        closeSubscription(currentSubscription, "Failed to close cache message subscription during shutdown");
 
         if (l1Provider instanceof AutoCloseable closeable) {
             try {
@@ -432,6 +443,17 @@ public class DefaultCacheManager implements CacheManager {
 
     private boolean isL2Enabled() {
         return cacheConfig.getL2() != null && cacheConfig.getL2().isEnabled();
+    }
+
+    private void closeSubscription(CacheMessageSubscription currentSubscription, String warningMessage) {
+        if (currentSubscription == null) {
+            return;
+        }
+        try {
+            currentSubscription.close();
+        } catch (Exception e) {
+            LOGGER.warn(warningMessage, e);
+        }
     }
 
     private Duration resolvePenetrationTtl(Duration candidate) {
