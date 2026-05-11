@@ -1,17 +1,17 @@
 # 多级缓存框架 (Multi-Tier Cache Framework)
 
-![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square&logo=openjdk&logoColor=white)
-![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square&logo=redis&logoColor=white)
-![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
+![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square\&logo=openjdk\&logoColor=white)
+![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square\&logo=redis\&logoColor=white)
+![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square\&logo=redis\&logoColor=white)
 ![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
 ![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
 
 ![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
-![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square&logo=google&logoColor=white)
-![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square&logo=openjdk&logoColor=white)
-![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square&logo=redis&logoColor=white)
+![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square\&logo=google\&logoColor=white)
+![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square\&logo=openjdk\&logoColor=white)
+![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square\&logo=redis\&logoColor=white)
 ![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
-![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square&logo=redis&logoColor=white)
+![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square\&logo=redis\&logoColor=white)
 
 一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。
 
@@ -362,7 +362,6 @@ main() {
 main "$@"
 ```
 
-
 ## 2. 模块间依赖拓扑架构 (Module Dependency Topology)
 
 ```mermaid
@@ -396,18 +395,16 @@ graph TD
 
 本框架利用 Java SPI (Service Provider Interface) 机制实现了极高的可扩展性。你可以实现以下核心接口，并将其声明在项目的 `META-INF/services/` 目录下：
 
-- **`L1Provider` (本地缓存扩展)**
+- **`L1Provider`** **(本地缓存扩展)**
   - 接口: `io.github.dk900912.multitiercache.spi.L1Provider`
   - 默认提供: `CaffeineL1Provider`, `GuavaL1Provider`, `JdkL1Provider`.
   - 使用场景: 接入你自定义的进程内缓存组件，或者实现特定的驱逐算法。
-  - *注意：框架提供的高级特性 `FineGrainedExpiry` (细粒度过期) 目前仅在配置为 Caffeine 时生效。*
-
-- **`L2Provider` (分布式缓存扩展)**
+  - *注意：框架提供的高级特性* *`FineGrainedExpiry`* *(细粒度过期) 目前仅在配置为 Caffeine 时生效。*
+- **`L2Provider`** **(分布式缓存扩展)**
   - 接口: `io.github.dk900912.multitiercache.spi.L2Provider`
   - 默认提供: `LettuceL2Provider`, `RedissonL2Provider`, `JedisL2Provider`.
   - 使用场景: 对接其他的分布式缓存系统（如 Memcached，或企业内部深度定制的 Redis 客户端）。
-
-- **`CacheMessageRepository` (缓存消息补偿机制扩展)**
+- **`CacheMessageRepository`** **(缓存消息补偿机制扩展)**
   - 接口: `io.github.dk900912.multitiercache.api.CacheMessageRepository`
   - 默认提供: `DefaultCacheMessageRepository` (no-op，仅打印日志，不落盘、不提供真正的持久化补偿能力).
   - 使用场景: 当 Pub/Sub 网络抖动导致 L1 失效消息丢失时，通过扩展该接口对接数据库（JDBC、MongoDB）或 MQ，框架后台的 `CacheMessageReplayer` 才能基于你落盘的消息进行补偿，以保证最终一致性。
@@ -488,81 +485,87 @@ sequenceDiagram
 
 ### L1Config (一级缓存配置)
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `enabled` | `boolean` | 是否启用一级本地缓存 | `true` |
-| `recordStats` | `boolean` | 是否开启本地缓存的统计信息记录 | `false` |
-| `maximumSize` | `Long` | 一级缓存允许存放的最大条目数 | `1000` |
-| `expireAfterWrite` | `Duration` | 写入后的全局过期时间 | `15000ms` (15s) |
-| `expireAfterAccess` | `Duration` | 最后一次访问后的全局过期时间 | `15000ms` (15s) |
-| `fineGrainedExpiry`| `FineGrainedExpiry` | 细粒度过期策略接口实例（**注意：仅 Caffeine 生效**）| `null` |
+| 字段                  | 类型                  | 含义                                | 默认值             |
+| :------------------ | :------------------ | :-------------------------------- | :-------------- |
+| `enabled`           | `boolean`           | 是否启用一级本地缓存                        | `true`          |
+| `recordStats`       | `boolean`           | 是否开启本地缓存的统计信息记录                   | `false`         |
+| `maximumSize`       | `Long`              | 一级缓存允许存放的最大条目数                    | `1000`          |
+| `expireAfterWrite`  | `Duration`          | 写入后的全局过期时间                        | `15000ms` (15s) |
+| `expireAfterAccess` | `Duration`          | 最后一次访问后的全局过期时间                    | `15000ms` (15s) |
+| `fineGrainedExpiry` | `FineGrainedExpiry` | 细粒度过期策略接口实例（**注意：仅 Caffeine 生效**） | `null`          |
 
 补充说明：
+
 - 当使用 `JdkL1Provider` 时，`recordStats=true` 属于非法配置，框架会在启动阶段直接 fail-fast。
 - 当配置 `fineGrainedExpiry` 时，必须选择 `CaffeineL1Provider`；否则框架会在启动阶段直接 fail-fast。
 - 当同时配置 `fineGrainedExpiry` 与全局 `expireAfterWrite` / `expireAfterAccess` 时，以 `fineGrainedExpiry` 为准，全局过期参数会被忽略。
 
 ### L2Config (二级缓存配置)
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `enabled` | `boolean` | 是否启用二级分布式缓存 | `true` |
-| `mutationChannelName`| `String` | 用于广播缓存失效变更的 Pub/Sub 频道名称 | `"multi-tier-cache-mutation"` |
-| `hosts` | `List<String>` | Redis 集群节点地址列表 (例如 "127.0.0.1:6379") | `null` (必须配置) |
-| `maxTotal` | `Integer` | 连接池最大活跃连接数 | `10` |
-| `maxIdle` | `Integer` | 连接池最大空闲连接数 | `1` |
-| `minIdle` | `Integer` | 连接池最小空闲连接数 | `1` |
-| `maxWait` | `Duration` | 从连接池获取连接的最大等待时间 | `6000ms` (6s) |
-| `connectionTimeout`| `Duration` | Redis 连接超时时间 | `6000ms` (6s) |
-| `socketTimeout` | `Duration` | Redis Socket 读写超时时间 | `6000ms` (6s) |
-| `maxRedirects` | `Integer` | 集群模式下的最大重定向次数 | `5` |
-| `username` | `String` | Redis 7.0 ACL 认证用户名 | `null` |
-| `password` | `String` | Redis 认证密码 | `null` |
+| 字段                    | 类型             | 含义                                   | 默认值                           |
+| :-------------------- | :------------- | :----------------------------------- | :---------------------------- |
+| `enabled`             | `boolean`      | 是否启用二级分布式缓存                          | `true`                        |
+| `mutationChannelName` | `String`       | 用于广播缓存失效变更的 Pub/Sub 频道名称             | `"multi-tier-cache-mutation"` |
+| `hosts`               | `List<String>` | Redis 集群节点地址列表 (例如 "127.0.0.1:6379") | `null` (必须配置)                 |
+| `maxTotal`            | `Integer`      | 连接池最大活跃连接数                           | `10`                          |
+| `maxIdle`             | `Integer`      | 连接池最大空闲连接数                           | `1`                           |
+| `minIdle`             | `Integer`      | 连接池最小空闲连接数                           | `1`                           |
+| `maxWait`             | `Duration`     | 从连接池获取连接的最大等待时间                      | `6000ms` (6s)                 |
+| `connectionTimeout`   | `Duration`     | Redis 连接超时时间                         | `6000ms` (6s)                 |
+| `socketTimeout`       | `Duration`     | Redis Socket 读写超时时间                  | `6000ms` (6s)                 |
+| `maxRedirects`        | `Integer`      | 集群模式下的最大重定向次数                        | `5`                           |
+| `username`            | `String`       | Redis 7.0 ACL 认证用户名                  | `null`                        |
+| `password`            | `String`       | Redis 认证密码                           | `null`                        |
 
 补充说明：
+
 - 当启用 L2 时，`hosts` 必须配置且每一项都不得为空白；`mutationChannelName` 也不得为空白。
 - 框架会在启动阶段严格校验连接池参数，要求满足 `maxTotal >= 1`、`maxIdle >= 0`、`minIdle >= 0` 且 `minIdle <= maxIdle <= maxTotal`。
 - `username` 若配置，则必须同时配置非空白的 `password`。
 
 ### Subscriber (Pub/Sub 订阅者线程池配置)
-*嵌套在 `L2Config` 中，用于控制接收失效消息时的异步处理线程池。*
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `corePoolSize` | `int` | 核心线程数 | `4` |
-| `maximumPoolSize` | `int` | 最大线程数 | `8` |
-| `keepAliveTime` | `Duration` | 非核心线程的闲置超时时间 | `0` |
-| `capacity` | `int` | 任务阻塞队列容量 | `100` |
+*嵌套在* *`L2Config`* *中，用于控制接收失效消息时的异步处理线程池。*
+
+| 字段                | 类型         | 含义           | 默认值   |
+| :---------------- | :--------- | :----------- | :---- |
+| `corePoolSize`    | `int`      | 核心线程数        | `4`   |
+| `maximumPoolSize` | `int`      | 最大线程数        | `8`   |
+| `keepAliveTime`   | `Duration` | 非核心线程的闲置超时时间 | `0`   |
+| `capacity`        | `int`      | 任务阻塞队列容量     | `100` |
 
 补充说明：
+
 - 启动阶段会严格校验 `corePoolSize >= 1`、`maximumPoolSize >= corePoolSize`、`keepAliveTime >= 0`、`capacity >= 1`。
 
 ### SingleFlight (并发加载保护配置)
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
+| 字段             | 类型         | 含义                        | 默认值             |
+| :------------- | :--------- | :------------------------ | :-------------- |
 | `awaitTimeout` | `Duration` | 缓存击穿时，等待持有锁的线程返回结果的最大超时时间 | `10000ms` (10s) |
 
 补充说明：
+
 - `awaitTimeout` 必须为正值，否则框架会在启动阶段直接 fail-fast。
 
 ### Compensation (本地消息补偿机制配置)
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `initialDelay` | `Duration` | 补偿后台任务启动的初始延迟时间 | `10000ms` (10s) |
-| `period` | `Duration` | 补偿后台任务的执行间隔周期 | `10000ms` (10s) |
-| `batchSize` | `int` | 每批次从 DB/MQ 抓取并处理的未同步消息最大数量 | `100` |
+| 字段             | 类型         | 含义                         | 默认值             |
+| :------------- | :--------- | :------------------------- | :-------------- |
+| `initialDelay` | `Duration` | 补偿后台任务启动的初始延迟时间            | `10000ms` (10s) |
+| `period`       | `Duration` | 补偿后台任务的执行间隔周期              | `10000ms` (10s) |
+| `batchSize`    | `int`      | 每批次从 DB/MQ 抓取并处理的未同步消息最大数量 | `100`           |
 
 ### CacheMiss (缓存未命中与穿透处理配置)
 
-| 字段 | 类型 | 含义 | 默认值 |
-| :--- | :--- | :--- | :--- |
+| 字段               | 类型         | 含义                            | 默认值             |
+| :--------------- | :--------- | :---------------------------- | :-------------- |
 | `penetrationTtl` | `Duration` | 发生缓存穿透（回源结果为 null）时，空值墓碑的存活时间 | `30000ms` (30s) |
-| `backfillTtl` | `Duration` | 正常缓存未命中并成功回源后，回填缓存的 TTL | `15000ms` (15s) |
-| `defaultTtl` | `Duration` | 未显式指定 TTL 时的默认缓存时长 | `15000ms` (15s) |
+| `backfillTtl`    | `Duration` | 正常缓存未命中并成功回源后，回填缓存的 TTL       | `15000ms` (15s) |
+| `defaultTtl`     | `Duration` | 未显式指定 TTL 时的默认缓存时长            | `15000ms` (15s) |
 
 补充说明：
+
 - `penetrationTtl`、`backfillTtl`、`defaultTtl` 都必须为正值；非法值会在启动阶段直接 fail-fast。
 
 ## 6. 架构哲学与 FAQ (Architecture Philosophy & FAQ)
@@ -577,14 +580,15 @@ sequenceDiagram
 
 以电商核心的“库存管理”场景为例，假设缓存中维护了三个关键字段：`stock`（总库存）、`locked`（锁定库存）、`available`（可用库存，即 stock - locked）。
 
-* **初始状态 (T0)**：`stock=10 | locked=0 | available=10`
-* **事件 T1（用户下单，锁定库存）**：数据库更新为 `stock=10 | locked=10 | available=0`。系统发出同步缓存消息 **M1 (v1)**。
-* **事件 T2（用户支付成功，扣减总库存并释放锁定）**：数据库再次更新为 `stock=0 | locked=0 | available=0`。系统发出同步缓存消息 **M2 (v2)**。
+- **初始状态 (T0)**：`stock=10 | locked=0 | available=10`
+- **事件 T1（用户下单，锁定库存）**：数据库更新为 `stock=10 | locked=10 | available=0`。系统发出同步缓存消息 **M1 (v1)**。
+- **事件 T2（用户支付成功，扣减总库存并释放锁定）**：数据库再次更新为 `stock=0 | locked=0 | available=0`。系统发出同步缓存消息 **M2 (v2)**。
 
 **正常情况（有序到达）**：M1 先到，M2 后到。缓存经历 T1 后最终停留在 T2 的状态：`stock=0 | locked=0 | available=0`，与数据库完美一致。
 
 **异常情况（无序消费下的乱序到达）**：
 如果由于网络抖动，**M2 比 M1 先被消费者处理**，就会出现以下诡异的现象：
+
 1. **M2 先到达**：缓存被正确更新为 T2 的最新状态（`stock=0 | locked=0 | available=0`）。
 2. **M1 姗姗来迟**：缓存被错误地“回退”到了 T1 的历史状态（`stock=10 | locked=10 | available=0`）。
 
@@ -595,24 +599,26 @@ sequenceDiagram
 为了解决上述乱序带来的脏数据问题，目前组件**强制要求业务方在设计缓存数据时，指定严格单调递增的数据版本号**（例如取自数据库的 `updated_time` 或是自增的 `version` 字段，配合 `@CacheVersion` 注解使用）。
 
 在更新 L2 缓存时，组件会进行版本号比对（通过 Redis Lua 脚本保证原子性）：
-* 只有当 **接收到的消息版本号 > 当前缓存中的版本号** 时，才允许执行更新。
-* **带入上述场景**：M2（携带 v2）先到达，缓存更新为 v2 状态；随后 M1（携带 v1）到达，组件发现当前缓存已经是 v2，`v1 < v2`，于是**直接丢弃 M1 的更新操作**。这样就完美避免了旧版本覆盖新版本的问题。
+
+- 只有当 **接收到的消息版本号 > 当前缓存中的版本号** 时，才允许执行更新。
+- **带入上述场景**：M2（携带 v2）先到达，缓存更新为 v2 状态；随后 M1（携带 v1）到达，组件发现当前缓存已经是 v2，`v1 < v2`，于是**直接丢弃 M1 的更新操作**。这样就完美避免了旧版本覆盖新版本的问题。
 
 #### 🚀 未来的演进思路：基于 Redis Stream 的 Hash 路由
 
 如果要从框架层面彻底免除业务方维护版本号的负担，真正实现同一 Key 的严格有序消费，未来的演进方向是抛弃普通的 Pub/Sub，转向 **Redis Stream** 或专用的 MQ：
+
 1. **一致性路由**：拦截同一 Key 的 insert/update/delete 事件，通过 `mod(hash(key), partition_size)` 算法，将其路由到固定的 Stream 分区（或 Topic Queue）。
 2. **单线程消费**：确保同一个分区的消息由单一消费者线程按序拉取并处理。
 3. 通过这种“物理隔离+串行处理”的方式，在底层架构上保证同一 Key 的消费顺序严格一致。
 
----
+***
 
 ### 6.2 本组件是否支持缓存过期主动加载 (Refresh-Ahead)？
 
-**不支持。** 
+**不支持。**
 目前框架采用的是纯粹的被动加载模式（Cache-Aside），即缓存过期后，只有当真实流量访问并发生 Cache Miss 时，才会触发 SingleFlight 去回源加载。
 
----
+***
 
 ### 6.3 本组件是否支持防缓存击穿？
 
@@ -628,21 +634,32 @@ sequenceDiagram
 
 1. **单机防击穿已经“足够安全”**
    假设你的服务部署了 100 个节点，面对 10 万 QPS 的突发洪峰。在单机 SingleFlight 的保护下，最极端的并发回源量也就仅仅是 **100 次**。对于绝大多数现代关系型数据库（MySQL/PostgreSQL 等）来说，瞬间处理 100 个针对同一个主键或索引的简单并发读查询，简直是轻而易举，根本不会导致数据库雪崩。
-   
 2. **引入分布式锁是典型的“过度设计”且损害性能**
    为了拦截这区区几十上百个并发读，如果在缓存框架中引入 Redis 分布式锁或 Zookeeper，这就意味着每一次缓存未命中，都要增加至少 1-2 次额外的网络 RTT（去获取和释放锁）。这完全违背了引入缓存是为了**极致提升读性能**的初衷，而且大大增加了系统发生死锁或外部依赖故障的风险。
-   
 3. **不要让缓存框架掩盖 DB 的真实病灶**
    如果数据库连几十个节点的并发读请求都扛不住，那真正的问题绝对不是缓存击穿，而是：
-   * 回源查询的 SQL 是一条极其消耗 CPU 的慢查询（例如缺少索引、大表 Join、深度分页）。
-   * 数据库本身的配置或硬件资源已经到了物理极限，需要考虑读写分离或分库分表。
+   - 回源查询的 SQL 是一条极其消耗 CPU 的慢查询（例如缺少索引、大表 Join、深度分页）。
+   - 数据库本身的配置或硬件资源已经到了物理极限，需要考虑读写分离或分库分表。
 
 **总结**：本组件坚持“小而美且高效”的防御策略——**用最轻量的本地锁保护应用免受十万级并发洪峰的摧毁，同时允许合理范围内（节点数级别）的并发去试探 DB 的底线。**
 
 #### 💡 拓展建议：如何实现“全局唯一回源”？
 
-虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader` 接口**。
+虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader`** **接口**。
 
 如果您确实有极高的一致性要求或 DB 极为脆弱，完全可以在您实现的 `CacheLoader.load()` 逻辑中，自行包裹一层分布式锁（例如 Redisson Lock）。由于框架层已经做好了第一道防线（单机 SingleFlight），这会带来一个极大的架构优势：**分布式锁的竞争压力会被成百上千倍地削弱！**
 
-在洪峰到来时，无论有多少并发请求，每个 JVM 节点最多只会有一个线程去竞争分布式锁。
+> **代码证据 在 DefaultCacheManager.get 里，顺序是：**
+>
+> 1. 先 readFromL1(key)
+> 2. 再 readFromL2(key)
+> 3. 都 miss 才进入 loadWithSingleFlight(...)，然后在 loadAsSingleFlightOwner 里，作为 singleflight owner，又会再做一轮 quiet 重试：
+>    - readFromL1(key, true)
+>    - readFromL2(key, true)
+> 4. 最后才执行 loader.load()
+>    这里最关键的一行是：
+>
+>    - loader.load()
+>   
+> 所以严格来说：用户自定义 CacheLoader 并不需要考虑`double check`， 而是 框架先替你用了两轮，再把执行权交给你，最终你只需要聚焦分布式锁逻辑即可！
+
