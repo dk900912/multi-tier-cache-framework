@@ -130,7 +130,7 @@ public class JdkL1Provider implements L1Provider {
     private static class CacheEntry {
         final Object value;
         final long writeTime;
-        volatile long accessTime;
+        long accessTime;
 
         CacheEntry(Object value, long writeTime, long accessTime) {
             this.value = value;

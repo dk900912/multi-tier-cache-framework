@@ -9,6 +9,7 @@ import io.github.dk900912.multitiercache.api.LifecycleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ScheduledExecutorService;
@@ -94,9 +95,16 @@ public final class CacheMessageReplayer implements LifecycleManager {
     private void compensate() {
         try {
             List<CacheMessage<?>> messages = cacheMessageRepository.fetchUnprocessed(cacheConfig.getCompensation().getBatchSize());
+            if (messages == null) {
+                LOGGER.error("CacheMessageRepository returned null from fetchUnprocessed; treating it as an empty batch");
+                messages = Collections.emptyList();
+            }
             for (CacheMessage<?> message : messages) {
-                if (message == null
-                        || message.getType() == CacheMessageType.PENETRATE
+                if (message == null) {
+                    LOGGER.error("CacheMessageRepository returned a null message entry from fetchUnprocessed; skipping invalid record");
+                    continue;
+                }
+                if (message.getType() == CacheMessageType.PENETRATE
                         || message.getType() == CacheMessageType.BACKFILL) {
                     continue;
                 }

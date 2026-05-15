@@ -100,268 +100,6 @@ public class CacheExample {
 
 > Redis 7 里 key 权限 和 channel 权限 是分开的，需要全部赋予权限！
 
-#### 启动脚本
-
-```shell
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-BASE_DIR="${HOME}/redis-cluster"
-PORTS=(7001 7002 7003 7004 7005 7006)
-
-ACL_USER="dk900912"
-ACL_PASS="qwe@1234"
-
-log() {
-  printf '%s\n' "$*"
-}
-
-redis_major() {
-  redis-server --version 2>/dev/null | awk -F'=' '{print $2}' | awk '{print $1}' | cut -d. -f1
-}
-
-redis_is_7_plus() {
-  local major
-  major="$(redis_major || true)"
-  [[ -n "${major}" && "${major}" -ge 7 ]]
-}
-
-install_redis() {
-  if command -v redis-server >/dev/null 2>&1 && command -v redis-cli >/dev/null 2>&1 && redis_is_7_plus; then
-    log "Redis 已就绪: $(redis-server --version | head -1)"
-    return
-  fi
-
-  log "切换并安装 Redis 7..."
-  sudo dnf -y module reset redis || true
-  sudo dnf -y module enable redis:7
-  sudo dnf -y install redis
-
-  if ! command -v redis-server >/dev/null 2>&1 || ! command -v redis-cli >/dev/null 2>&1; then
-    log "redis-server 或 redis-cli 不存在，安装失败"
-    exit 1
-  fi
-
-  if ! redis_is_7_plus; then
-    log "安装后仍不是 Redis 7+"
-    redis-server --version || true
-    exit 1
-  fi
-
-  log "Redis 已安装: $(redis-server --version | head -1)"
-}
-
-validate_acl_config() {
-  if [[ -z "${ACL_USER}" || -z "${ACL_PASS}" ]]; then
-    log "ACL_USER 或 ACL_PASS 未配置"
-    exit 1
-  fi
-}
-
-cleanup() {
-  log "清理旧环境..."
-  pkill -f "redis-server .*${BASE_DIR}" || true
-  sleep 1
-  rm -rf "${BASE_DIR}"
-  mkdir -p "${BASE_DIR}"
-}
-
-gen_config() {
-  log "生成节点配置..."
-
-  for port in "${PORTS[@]}"; do
-    local node_dir="${BASE_DIR}/${port}"
-    mkdir -p "${node_dir}"
-
-    cat > "${node_dir}/users.acl" <<EOF
-user default off
-user ${ACL_USER} on >${ACL_PASS} allcommands allkeys allchannels
-EOF
-
-    cat > "${node_dir}/redis.conf" <<EOF
-port ${port}
-bind 127.0.0.1
-protected-mode no
-daemonize yes
-
-dir ${node_dir}
-dbfilename dump.rdb
-pidfile ${node_dir}/redis.pid
-logfile ${node_dir}/redis.log
-
-cluster-enabled yes
-cluster-config-file nodes.conf
-cluster-node-timeout 5000
-
-appendonly yes
-appendfilename appendonly.aof
-
-aclfile ${node_dir}/users.acl
-
-masteruser ${ACL_USER}
-masterauth ${ACL_PASS}
-EOF
-  done
-}
-
-wait_node_ready() {
-  local port="$1"
-
-  for _ in $(seq 1 60); do
-    if redis-cli --user "${ACL_USER}" -a "${ACL_PASS}" -p "${port}" ping >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 0.25
-  done
-
-  return 1
-}
-
-start_nodes() {
-  log "启动 Redis 节点..."
-
-  for port in "${PORTS[@]}"; do
-    redis-server "${BASE_DIR}/${port}/redis.conf"
-  done
-
-  for port in "${PORTS[@]}"; do
-    log "  - 等待 ${port} 就绪..."
-    if ! wait_node_ready "${port}"; then
-      log "节点 ${port} 启动失败，查看日志：${BASE_DIR}/${port}/redis.log"
-      exit 1
-    fi
-  done
-}
-
-create_cluster() {
-  log "创建集群..."
-
-  local hosts=()
-  for port in "${PORTS[@]}"; do
-    hosts+=("127.0.0.1:${port}")
-  done
-
-  printf 'yes\n' | redis-cli --user "${ACL_USER}" -a "${ACL_PASS}" --cluster create "${hosts[@]}" --cluster-replicas 1
-}
-
-check_cluster() {
-  log "检查集群状态..."
-  redis-cli -c --user "${ACL_USER}" -a "${ACL_PASS}" -p 7001 cluster info
-  echo
-  redis-cli -c --user "${ACL_USER}" -a "${ACL_PASS}" -p 7001 cluster nodes
-}
-
-check_acl() {
-  log "检查 ACL 用户..."
-  redis-cli --user "${ACL_USER}" -a "${ACL_PASS}" -p 7001 ACL GETUSER "${ACL_USER}"
-}
-
-show_usage() {
-  echo
-  log "Redis 集群已就绪"
-  log "ACL 用户: ${ACL_USER}"
-  log "ACL 权限: allcommands + allkeys + allchannels"
-  log "测试连接:"
-  log "  redis-cli -c --user ${ACL_USER} -a '${ACL_PASS}' -p 7001"
-  log "查看集群:"
-  log "  redis-cli -c --user ${ACL_USER} -a '${ACL_PASS}' -p 7001 cluster info"
-  log "查看 ACL:"
-  log "  redis-cli --user ${ACL_USER} -a '${ACL_PASS}' -p 7001 ACL GETUSER ${ACL_USER}"
-}
-
-main() {
-  validate_acl_config
-  install_redis
-  cleanup
-  gen_config
-  start_nodes
-  create_cluster
-  check_cluster
-  check_acl
-  show_usage
-}
-
-main "$@"
-```
-
-#### 关停脚本
-
-```shell
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-PORTS=(7001 7002 7003 7004 7005 7006)
-ACL_USER="dk900912"
-ACL_PASS="qwe@1234"
-
-log() {
-  printf '%s\n' "$*"
-}
-
-node_alive() {
-  local port="$1"
-  redis-cli --no-auth-warning --user "${ACL_USER}" -a "${ACL_PASS}" -p "$port" ping >/dev/null 2>&1
-}
-
-wait_node_down() {
-  local port="$1"
-  for _ in $(seq 1 20); do
-    if ! node_alive "$port"; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  return 1
-}
-
-shutdown_node() {
-  local port="$1"
-
-  log "关闭节点 ${port} ..."
-
-  if node_alive "$port"; then
-    if redis-cli --no-auth-warning --user "${ACL_USER}" -a "${ACL_PASS}" -p "$port" shutdown nosave >/dev/null 2>&1; then
-      :
-    else
-      log "节点 ${port} 发送 shutdown 命令失败"
-      return 1
-    fi
-
-    if wait_node_down "$port"; then
-      log "节点 ${port} 已关闭"
-      return 0
-    else
-      log "节点 ${port} 在预期时间内未关闭"
-      return 1
-    fi
-  else
-    log "节点 ${port} 无响应或认证失败"
-    return 1
-  fi
-}
-
-main() {
-  log "正在关闭 Redis 集群..."
-
-  local failed=0
-
-  for port in "${PORTS[@]}"; do
-    if ! shutdown_node "$port"; then
-      failed=1
-    fi
-  done
-
-  if [[ "$failed" -eq 0 ]]; then
-    log "Redis 集群已全部关闭"
-  else
-    log "Redis 集群部分节点关闭失败，请检查日志或端口状态"
-    exit 1
-  fi
-}
-
-main "$@"
-```
-
 ## 2. 模块间依赖拓扑架构 (Module Dependency Topology)
 
 ```mermaid
@@ -567,6 +305,8 @@ sequenceDiagram
 补充说明：
 
 - `penetrationTtl`、`backfillTtl`、`defaultTtl` 都必须为正值；非法值会在启动阶段直接 fail-fast。
+- 对于 `cacheManager.get(key, Supplier<T>)` / `cacheManager.get(key, Supplier<T>, ttl)` 这两个便捷重载，若 `Supplier` 回源返回 `null`，框架会将其视为“缓存穿透”，并按 `penetrationTtl` 写入空值墓碑。
+- 如果业务方需要更显式地区分“存在的数据”和“确认不存在的数据”，应优先使用 `CacheLoader` 重载，并显式返回 `CacheLoadResult.of(...)` 或 `CacheLoadResult.penetration(...)`。
 
 ## 6. 架构哲学与 FAQ (Architecture Philosophy & FAQ)
 
@@ -663,3 +403,22 @@ sequenceDiagram
 >   
 > 所以严格来说：用户自定义 CacheLoader 并不需要考虑`double check`， 而是 框架先替你用了两轮，再把执行权交给你，最终你只需要聚焦分布式锁逻辑即可！
 
+***
+
+### 6.4 为什么不调用 `cacheManager.shutdown()`，JVM 进程也会自动退出？
+
+- 当前框架自己创建的后台线程，明确就是 daemon：
+    - 补偿线程在 [CacheManagerFactory](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-core/src/main/java/io/github/dk900912/multitiercache/core/CacheManagerFactory.java#L50-L54)
+    - Jedis/Lettuce/Redisson 的消息处理线程也都 `setDaemon(true)` 了：
+        - [JedisL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-jedis/src/main/java/io/github/dk900912/multitiercache/provider/jedis/JedisL2Provider.java#L82-L93)
+        - [LettuceL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-lettuce/src/main/java/io/github/dk900912/multitiercache/provider/lettuce/LettuceL2Provider.java#L70-L81)
+        - [RedissonL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-redisson/src/main/java/io/github/dk900912/multitiercache/provider/redisson/RedissonL2Provider.java#L81-L92)
+- JVM 规则就是：
+    - **只要所有非守护线程结束了**
+    - **只剩 daemon 线程**
+    - **进程就会退出**
+
+简单 main 场景中即使不调用 shutdown()，JVM 通常也会自动退出；这属于守护线程模型带来的现象，不应作为资源管理契约依赖。
+
+- **在当前实现下，不调用 `cacheManager.shutdown()`，JVM 仍会自动退出，这是正常现象。**
+- **但从框架使用规范上，仍然应该显式调用 `shutdown()`。**

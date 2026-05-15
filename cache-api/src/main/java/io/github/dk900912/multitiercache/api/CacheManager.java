@@ -20,7 +20,7 @@ public interface CacheManager extends CacheMutationProcessor, LifecycleManager {
      * Uses the default Time-To-Live (TTL) defined in the configuration.
      *
      * @param key    the cache key
-     * @param loader a supplier to load the value if the cache misses
+     * @param loader a supplier to load the value if the cache misses; returning {@code null} is treated as cache penetration
      * @param <T>    the type of the cached value
      * @return the cached or newly loaded value
      */
@@ -31,7 +31,7 @@ public interface CacheManager extends CacheMutationProcessor, LifecycleManager {
      * specifying a custom TTL for the loaded value.
      *
      * @param key    the cache key
-     * @param loader a supplier to load the value if the cache misses
+     * @param loader a supplier to load the value if the cache misses; returning {@code null} is treated as cache penetration
      * @param ttl    the time-to-live duration applied to the L2 cache (L1 expiry is governed by local configuration)
      * @param <T>    the type of the cached value
      * @return the cached or newly loaded value

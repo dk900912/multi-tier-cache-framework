@@ -32,11 +32,11 @@ final class LifecycleStateMachine {
     }
 
     void markStarted() {
-        state.set(State.STARTED);
+        transition(State.STARTING, State.STARTED, "markStarted");
     }
 
     void markBootstrapFailed() {
-        state.set(State.NEW);
+        transition(State.STARTING, State.NEW, "markBootstrapFailed");
     }
 
     boolean beginShutdown() {
@@ -48,5 +48,13 @@ final class LifecycleStateMachine {
         STARTING,
         STARTED,
         SHUTDOWN
+    }
+
+    private void transition(State expected, State target, String action) {
+        State current = state.get();
+        if (!state.compareAndSet(expected, target)) {
+            throw new IllegalStateException(ownerName + " cannot " + action
+                    + " from state " + current + "; expected " + expected);
+        }
     }
 }

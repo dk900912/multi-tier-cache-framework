@@ -28,6 +28,10 @@ public final class AnnotationVersionExtractor {
 
         try {
             Object value = versionField.get(target);
+            if (value == null) {
+                throw new IllegalStateException("@CacheVersion field '" + versionField.getName()
+                        + "' in class " + targetClass.getName() + " cannot be null");
+            }
             return ((Number) value).longValue();
         } catch (IllegalAccessException e) {
             throw new RuntimeException("Failed to access @CacheVersion field in class: " + targetClass.getName(), e);

@@ -25,7 +25,7 @@ public interface CacheMessageRepository {
      * Fetches a batch of unprocessed cache messages.
      *
      * @param limit the maximum number of messages to fetch
-     * @return a list of unprocessed messages
+     * @return a non-null list of unprocessed messages whose elements must also be non-null
      */
     List<CacheMessage<?>> fetchUnprocessed(int limit);
 

@@ -7,6 +7,7 @@ import java.util.Objects;
  * Represents the result of loading a value into the cache.
  * <p>
  * Encapsulates the loaded data, its version, TTL, and whether it indicates a cache penetration (i.e., data not found).
+ * Use {@link #of(Object, Long, Duration)} for present data and {@link #penetration(Duration)} for absent data.
  * </p>
  *
  * @param <T> the type of the loaded data
@@ -31,7 +32,13 @@ public class CacheLoadResult<T> {
         );
     }
 
-    // todo: ttl必须是mills
+    /**
+     * Creates a load result representing cache penetration, meaning the loader confirmed that no data exists.
+     *
+     * @param ttl the tombstone TTL to store for the penetration marker
+     * @param <T> the type of the cached data
+     * @return a load result representing an absent value
+     */
     public static <T> CacheLoadResult<T> penetration(Duration ttl) {
         return new CacheLoadResult<>(null, -1L, ttl);
     }
