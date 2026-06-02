@@ -405,12 +405,12 @@ public class CacheConfig {
      */
     public static class Compensation {
         /**
-         * The initial delay before the compensation task starts.
+         * The initial delay before the compensation replayer starts.
          */
         private Duration initialDelay = Duration.ofSeconds(10);
 
         /**
-         * The period between successive executions of the compensation task.
+         * The period between successive executions of the compensation replayer.
          */
         private Duration period = Duration.ofSeconds(10);
 

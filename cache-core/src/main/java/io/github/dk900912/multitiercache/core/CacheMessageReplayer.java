@@ -32,7 +32,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
     private final CacheMutationProcessor mutationProcessor;
     private final CacheConfig cacheConfig;
     private final ScheduledExecutorService scheduler;
-    private final LifecycleStateMachine lifecycleStateMachine = new LifecycleStateMachine("Compensation task");
+    private final LifecycleStateMachine lifecycleStateMachine = new LifecycleStateMachine("Compensation replayer");
 
     private volatile ScheduledFuture<?> compensationTask;
 
@@ -60,7 +60,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
                     TimeUnit.MILLISECONDS
             );
             lifecycleStateMachine.markStarted();
-            LOGGER.info("Compensation task started.");
+            LOGGER.info("Compensation replayer started.");
         } catch (Exception e) {
             compensationTask = null;
             lifecycleStateMachine.markBootstrapFailed();
@@ -89,7 +89,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
             scheduler.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        LOGGER.info("Compensation task stopped");
+        LOGGER.info("Compensation replayer stopped.");
     }
 
     private void compensate() {
@@ -116,7 +116,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
                 }
             }
         } catch (Exception e) {
-            LOGGER.error("Failed to execute compensation task", e);
+            LOGGER.error("Failed to execute compensation replayer", e);
         }
     }
 }
