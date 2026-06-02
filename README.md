@@ -1,4 +1,4 @@
-# 多级缓存框架 (Multi-Tier Cache Framework)
+# 多级缓存框架
 
 ![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square\&logo=openjdk\&logoColor=white)
 ![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square\&logo=redis\&logoColor=white)
@@ -15,7 +15,7 @@
 
 一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。
 
-## 1. 接入指南 (Introduction & Integration Guide)
+## 1. 接入指南
 
 本框架提供了一套完整的多级缓存解决方案（L1 本地缓存 + L2 分布式缓存），旨在解决常见的缓存痛点，例如缓存穿透、缓存击穿（通过内置的 `SingleFlight` 机制防范），以及分布式节点间的缓存一致性（通过 Redis Pub/Sub 广播 L1 失效）。
 
@@ -73,22 +73,35 @@ public class CacheExample {
         config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
         config.getL2().setMutationChannelName("cache:mutation");
         
-        // 可选：配置 Redis 7.0 ACL 认证
-        // config.getL2().setUsername("default");
-        // config.getL2().setPassword("your-password");
-        
         // 创建并启动 CacheManager
         CacheManager cacheManager = CacheManagerFactory.create(config);
         cacheManager.bootstrap();
         
-        // 核心使用示例
-        String value = cacheManager.get(
-            () -> "user:1", 
-            () -> "Value From DB", 
+        // --- 核心业务使用示例（模拟 userRepository 的真实调用） ---
+        String userId = "user:1001";
+        
+        // 1. Insert: 数据库插入后，获取到刚生成的实体及版本号，写入缓存
+        User newUser = userRepository.insert(new User("Alice"));
+        cacheManager.insert(() -> userId, newUser, newUser.getVersion(), Duration.ofMinutes(30));
+        
+        // 2. Get: 查询缓存 (将直接命中刚才的 insert)
+        User user = cacheManager.get(
+            () -> userId, 
+            () -> userRepository.findById(1001L), 
             Duration.ofMinutes(30)
         );
+        System.out.println("Cached Value: " + user.getName());
         
-        System.out.println("Cached Value: " + value);
+        // 3. Update: 模拟 DB 乐观锁更新成功后，获取最新版本号更新缓存
+        User updatedUser = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
+        if (updatedUser != null) {
+            cacheManager.update(() -> userId, updatedUser, updatedUser.getVersion(), Duration.ofMinutes(30));
+        }
+        
+        // 4. Evict: 模拟 DB 删除，先查出当前版本号（或在删除时返回），然后驱逐缓存
+        Long currentVersion = userRepository.findById(1001L).getVersion();
+        userRepository.deleteById(1001L);
+        cacheManager.evict(() -> userId, currentVersion + 1, Duration.ofMinutes(5));
         
         // 安全关闭，释放底层线程和资源
         cacheManager.shutdown();
@@ -98,9 +111,9 @@ public class CacheExample {
 
 ### Redis Cluster 部署
 
-> Redis 7 里 key 权限 和 channel 权限 是分开的，需要全部赋予权限！
+> Redis 7 里 key 权限和 channel 权限是分开的，需要全部赋予权限！
 
-## 2. 模块间依赖拓扑架构 (Module Dependency Topology)
+## 2. 模块间依赖拓扑架构
 
 ```mermaid
 graph TD
@@ -129,7 +142,7 @@ graph TD
     l2_redisson -. 实现 .-> api
 ```
 
-## 3. 拓展点与灵活定制 (Extension Points)
+## 3. 拓展点与灵活定制
 
 本框架利用 Java SPI (Service Provider Interface) 机制实现了极高的可扩展性。你可以实现以下核心接口，并将其声明在项目的 `META-INF/services/` 目录下：
 
@@ -217,7 +230,7 @@ sequenceDiagram
     CacheManager-->>Client: 成功
 ```
 
-## 5. 核心配置参考 (Configuration)
+## 5. 核心配置参考
 
 本框架的所有配置均封装在 `CacheConfig` 模型中，以下是各子配置项的含义及默认值参考。
 
@@ -308,11 +321,11 @@ sequenceDiagram
 - 对于 `cacheManager.get(key, Supplier<T>)` / `cacheManager.get(key, Supplier<T>, ttl)` 这两个便捷重载，若 `Supplier` 回源返回 `null`，框架会将其视为“缓存穿透”，并按 `penetrationTtl` 写入空值墓碑。
 - 如果业务方需要更显式地区分“存在的数据”和“确认不存在的数据”，应优先使用 `CacheLoader` 重载，并显式返回 `CacheLoadResult.of(...)` 或 `CacheLoadResult.penetration(...)`。
 
-## 6. 架构哲学与 FAQ (Architecture Philosophy & FAQ)
+## 6. FAQ
 
 ### 6.1 本组件是否支持同一 Key 的全局有序消费？
 
-**不支持！换一种解决了时序紊乱问题，即强制要求业务方在设计缓存数据时，指定严格单调递增的数据版本号**（例如取自数据库的 `updated_time` 或是自增的 `version` 字段，配合 `@CacheVersion` 注解使用）。**
+**不支持！但本框架通过另一种方式规避了时序紊乱问题，即强制要求业务方在设计缓存数据时，指定严格单调递增的数据版本号**（例如取自数据库的 `updated_time` 或是自增的 `version` 字段，配合 `@CacheVersion` 注解使用）。
 
 在分布式系统中，由于网络延迟抖动、消费者节点的处理速度差异等不可控因素，缓存同步消息的到达顺序极有可能与数据库事件的实际发生顺序不一致（即**消息乱序**）。如果不从框架底层强制保证同一 Key 的有序性，在对数据一致性要求极高的场景下，就会引发致命的“旧数据覆盖新数据”问题。
 
@@ -336,7 +349,15 @@ sequenceDiagram
 
 #### 🛡️ 当前的规避方案：基于版本号的乐观控制
 
-为了解决上述乱序带来的脏数据问题，目前组件**强制要求业务方在设计缓存数据时，指定严格单调递增的数据版本号**（例如取自数据库的 `updated_time` 或是自增的 `version` 字段，配合 `@CacheVersion` 注解使用）。
+为了解决上述乱序带来的脏数据问题，目前组件**强制要求业务方在设计缓存数据时，指定严格单调递增的数据版本号**。
+
+**最佳实践**：在更新数据库时，强烈建议采用**乐观锁**机制来保证版本号的严格单调递增。例如执行更新时：
+```sql
+UPDATE product_stock 
+SET stock = 0, locked = 0, available = 0, version = version + 1 
+WHERE id = 1001 AND version = {old_version};
+```
+只有数据库更新成功，才能提取到最新的 `version` 并调用 `cacheManager.update(...)`，从而从根本上保证并发场景下的时序安全。
 
 在更新 L2 缓存时，组件会进行版本号比对（通过 Redis Lua 脚本保证原子性）：
 
@@ -368,22 +389,14 @@ sequenceDiagram
 
 如果到了“只允许多节点集群中存在一个线程针对同一 Key 的数据进行回源查询”这个地步，**可能业务方的系统架构或数据库层面本身已经存在极大的不合理之处。**
 
-本框架故意不提供基于分布式锁的全局防击穿，主要基于以下架构考量：
+本框架没有默认提供基于分布式锁的全局防击穿，最主要的一个考量：**不要让缓存框架掩盖 DB 的真实病灶**。如果数据库连几十个节点的并发读请求都扛不住，那真正的问题绝对不是缓存击穿，而是：
 
-1. **单机防击穿已经“足够安全”**
-   假设你的服务部署了 100 个节点，面对 10 万 QPS 的突发洪峰。在单机 SingleFlight 的保护下，最极端的并发回源量也就仅仅是 **100 次**。对于绝大多数现代关系型数据库（MySQL/PostgreSQL 等）来说，瞬间处理 100 个针对同一个主键或索引的简单并发读查询，简直是轻而易举，根本不会导致数据库雪崩。
-2. **引入分布式锁是典型的“过度设计”且损害性能**
-   为了拦截这区区几十上百个并发读，如果在缓存框架中引入 Redis 分布式锁或 Zookeeper，这就意味着每一次缓存未命中，都要增加至少 1-2 次额外的网络 RTT（去获取和释放锁）。这完全违背了引入缓存是为了**极致提升读性能**的初衷，而且大大增加了系统发生死锁或外部依赖故障的风险。
-3. **不要让缓存框架掩盖 DB 的真实病灶**
-   如果数据库连几十个节点的并发读请求都扛不住，那真正的问题绝对不是缓存击穿，而是：
    - 回源查询的 SQL 是一条极其消耗 CPU 的慢查询（例如缺少索引、大表 Join、深度分页）。
    - 数据库本身的配置或硬件资源已经到了物理极限，需要考虑读写分离或分库分表。
 
-**总结**：本组件坚持“小而美且高效”的防御策略——**用最轻量的本地锁保护应用免受十万级并发洪峰的摧毁，同时允许合理范围内（节点数级别）的并发去试探 DB 的底线。**
-
 #### 💡 拓展建议：如何实现“全局唯一回源”？
 
-虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader`** **接口**。
+虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader` **接口。
 
 如果您确实有极高的一致性要求或 DB 极为脆弱，完全可以在您实现的 `CacheLoader.load()` 逻辑中，自行包裹一层分布式锁（例如 Redisson Lock）。由于框架层已经做好了第一道防线（单机 SingleFlight），这会带来一个极大的架构优势：**分布式锁的竞争压力会被成百上千倍地削弱！**
 
@@ -420,3 +433,90 @@ sequenceDiagram
 
 - **在当前实现下，不调用 `cacheManager.shutdown()`，JVM 仍会自动退出，这是正常现象。**
 - **但从框架使用规范上，仍然应该显式调用 `shutdown()`。**
+
+***
+
+### 6.5 为什么需要使用多级缓存（L1 + L2）？单纯使用 L1 或 L2 不行吗？
+
+在现代高并发架构中，单纯依赖任何单一层级的缓存都会遇到不可逾越的物理或网络瓶颈。本框架采用 **L1 本地缓存 + L2 分布式缓存** 的组合，正是为了取长补短。
+
+#### 单纯使用 L1（本地缓存）的痛点
+- **数据不一致**：多个微服务节点各自维护本地 L1。当节点 A 更新了数据库，节点 B 无法感知，导致节点 B 仍在使用脏数据。
+- **内存受限**：L1 占用的是 JVM 堆内存。如果强行把海量数据塞进 L1，极易引发频繁的 Full GC，最终拖垮整个应用。
+- **冷启动雪崩**：应用重启或扩容时，L1 瞬间清空，海量请求会直接打穿缓存，压垮数据库。
+
+#### 单纯使用 L2（分布式缓存，如 Redis）的痛点
+- **网络带宽瓶颈（热点 Key）**：对于大促秒杀等超高并发的“热点数据”，所有请求都会打向集中式的 Redis。这极易打满网络带宽或单点 CPU，引发系统级雪崩。
+- **网络与序列化开销**：每一次 L2 访问都需要跨网络传输并进行序列化/反序列化。对于对响应时间要求极致（纳秒级别）的系统，这几毫秒的开销也是难以忍受的。
+
+#### L1 + L2 多级缓存的完美结合
+本框架将两者的优势结合，并从底层解决了一致性难题：
+1. **极致抗热点**：L1 拦截了 90%+ 的热点读请求，彻底消除了 Redis 热点 Key 造成的网络和 CPU 瓶颈，实现纳秒级响应。
+2. **大容量兜底**：L2 作为海量数据的共享池，保证了应用冷启动时不会击穿到 DB。
+3. **一致性保障**：通过 L2 的 Pub/Sub 机制，当有节点发生数据变更时，框架会自动广播失效消息，精准清除其他节点的 L1 脏数据，在极低成本下兼顾了性能与一致性。
+
+***
+
+### 6.6 L2 层的原子性保障：如何保持 SET 和 PUBLISH 的原子性？
+
+在使用多级缓存（L1+L2）架构时，当业务数据发生变更（`insert` / `update` / `delete`）时，除了更新数据库，我们还需要做两件事：
+1. **更新 L2 缓存**（即向 Redis 执行 `SET`）。
+2. **广播失效消息**（即向 Redis 执行 `PUBLISH`，通知其他节点的 L1 清除对应缓存）。
+
+**痛点与风险：**
+如果这两步操作由 Java 客户端分别发送命令（先 `SET`，再 `PUBLISH`），那么在极端情况下（例如 `SET` 成功后应用突然宕机，或者网络闪断），就会导致 `PUBLISH` 未执行。此时，L2 已经是最新数据，但其他节点的 L1 仍是旧数据，引发严重的**数据不一致**。
+
+**解决方案：**
+为了保证这两个操作的**绝对原子性**，本框架在底层全部通过 **Redis Lua 脚本** 来执行数据变更逻辑。Redis 在执行 Lua 脚本时具有排他性，整个脚本会被当作一个单独的命令执行，要么全部成功，要么全部失败，完美解决了 `SET` 和 `PUBLISH` 的原子性问题。
+
+此外，Lua 脚本中还内置了前文提到的**版本号校验（乐观控制）**逻辑，确保只有当新版本大于当前缓存版本时，才允许更新并广播。
+
+#### 具体的 Lua 脚本实现
+
+**1. `UPSERT_LUA_SCRIPT` (用于 insert 和 update 操作)**
+
+```lua
+local current = redis.call('GET', KEYS[1])
+local ttlMillis = tonumber(ARGV[2])
+if not current then
+    -- 如果缓存中没有该数据，直接 SET 并 PUBLISH
+    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+    redis.call('PUBLISH', ARGV[4], ARGV[1])
+    return 1
+end
+-- 如果缓存已存在，比对版本号
+local newVersion = tonumber(ARGV[3])
+local currentPayload = cjson.decode(current)
+local currentVersion = tonumber(currentPayload.version)
+if newVersion > currentVersion then
+    -- 新版本更大，允许更新 L2 并广播失效消息
+    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+    redis.call('PUBLISH', ARGV[4], ARGV[1])
+    return 1
+end
+-- 版本号落后，忽略此次更新
+return 0
+```
+
+**2. `DELETE_LUA_SCRIPT` (用于 delete / evict 操作)**
+
+```lua
+local current = redis.call('GET', KEYS[1])
+local ttlMillis = tonumber(ARGV[2])
+if not current then
+    -- 为了防止“并发查库+删除”导致的脏数据，即使当前缓存不存在，也写入墓碑值并 PUBLISH
+    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+    redis.call('PUBLISH', ARGV[4], ARGV[1])
+    return 1
+end
+local newVersion = tonumber(ARGV[3])
+local currentPayload = cjson.decode(current)
+local currentVersion = tonumber(currentPayload.version)
+-- 注意这里的区别：删除操作允许版本号相等 (>=)
+if newVersion >= currentVersion then
+    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+    redis.call('PUBLISH', ARGV[4], ARGV[1])
+    return 1
+end
+return 0
+```
