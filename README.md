@@ -53,6 +53,7 @@
 ### 极简初始化与使用示例
 
 ```java
+import io.github.dk900912.multitiercache.api.CacheKey;
 import io.github.dk900912.multitiercache.api.CacheManager;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
 import io.github.dk900912.multitiercache.core.CacheManagerFactory;
@@ -73,6 +74,9 @@ public class CacheExample {
         config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
         config.getL2().setMutationChannelName("cache:mutation");
         
+        // 强烈建议：将业务包加入防 RCE 序列化白名单，防止反序列化拦截
+        config.getCodec().setTrustedPackages(List.of("com.yourcompany.domain"));
+        
         // 创建并启动 CacheManager
         CacheManager cacheManager = CacheManagerFactory.create(config);
         cacheManager.bootstrap();
@@ -82,11 +86,11 @@ public class CacheExample {
         
         // 1. Insert: 数据库插入后，获取到刚生成的实体及版本号，写入缓存
         User newUser = userRepository.insert(new User("Alice"));
-        cacheManager.insert(() -> userId, newUser, newUser.getVersion(), Duration.ofMinutes(30));
+        cacheManager.insert(CacheKey.simple(userId), newUser, newUser.getVersion(), Duration.ofMinutes(30));
         
         // 2. Get: 查询缓存 (将直接命中刚才的 insert)
         User user = cacheManager.get(
-            () -> userId, 
+            CacheKey.simple(userId), 
             () -> userRepository.findById(1001L), 
             Duration.ofMinutes(30)
         );
@@ -95,13 +99,13 @@ public class CacheExample {
         // 3. Update: 模拟 DB 乐观锁更新成功后，获取最新版本号更新缓存
         User updatedUser = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
         if (updatedUser != null) {
-            cacheManager.update(() -> userId, updatedUser, updatedUser.getVersion(), Duration.ofMinutes(30));
+            cacheManager.update(CacheKey.simple(userId), updatedUser, updatedUser.getVersion(), Duration.ofMinutes(30));
         }
         
         // 4. Evict: 模拟 DB 删除，先查出当前版本号（或在删除时返回），然后驱逐缓存
         Long currentVersion = userRepository.findById(1001L).getVersion();
         userRepository.deleteById(1001L);
-        cacheManager.evict(() -> userId, currentVersion + 1, Duration.ofMinutes(5));
+        cacheManager.evict(CacheKey.simple(userId), currentVersion + 1, Duration.ofMinutes(5));
         
         // 安全关闭，释放底层线程和资源
         cacheManager.shutdown();
@@ -142,10 +146,14 @@ graph TD
     l2_redisson -. 实现 .-> api
 ```
 
-## 3. 拓展点与灵活定制
+### 3. 拓展点与灵活定制
 
 本框架利用 Java SPI (Service Provider Interface) 机制实现了极高的可扩展性。你可以实现以下核心接口，并将其声明在项目的 `META-INF/services/` 目录下：
 
+- **`CacheCodec`** **(序列化与反序列化扩展)**
+  - 接口: `io.github.dk900912.multitiercache.spi.CacheCodec`
+  - 默认提供: `JacksonCacheCodec` (基于 Jackson 并在底层通过 PTV 白名单防范 RCE，解决了泛型类型擦除)。
+  - 使用场景: 当你希望采用其他序列化框架（如 Fastjson, Gson）或定制特殊序列化规则时。
 - **`L1Provider`** **(本地缓存扩展)**
   - 接口: `io.github.dk900912.multitiercache.spi.L1Provider`
   - 默认提供: `CaffeineL1Provider`, `GuavaL1Provider`, `JdkL1Provider`.
@@ -158,7 +166,7 @@ graph TD
 - **`CacheMessageRepository`** **(缓存消息补偿机制扩展)**
   - 接口: `io.github.dk900912.multitiercache.api.CacheMessageRepository`
   - 默认提供: `DefaultCacheMessageRepository` (no-op，仅打印日志，不落盘、不提供真正的持久化补偿能力).
-  - 使用场景: 当 Pub/Sub 网络抖动导致 L1 失效消息丢失时，通过扩展该接口对接数据库（JDBC、MongoDB）或 MQ，框架后台的 `CacheMessageReplayer` 才能基于你落盘的消息进行补偿，以保证最终一致性。
+  - 使用场景: 当 Pub/Sub 网络抖动导致 L1 失效消息丢失时，通过扩展该接口对接数据库（JDBC、MongoDB）或 MQ，框架后台的 `CacheMessageReplayer` 才能基于你落盘的消息进行重放补偿，以保证最终一致性。
 
 ## 4. 核心业务时序图 (Core Business Sequence Diagram)
 
@@ -274,6 +282,17 @@ sequenceDiagram
 - 框架会在启动阶段严格校验连接池参数，要求满足 `maxTotal >= 1`、`maxIdle >= 0`、`minIdle >= 0` 且 `minIdle <= maxIdle <= maxTotal`。
 - `username` 若配置，则必须同时配置非空白的 `password`。
 
+### Codec (序列化白名单配置)
+
+*内嵌在* *`CacheConfig`* *中，用于 Jackson 反序列化的安全防御。*
+
+| 字段                | 类型         | 含义           | 默认值   |
+| :---------------- | :--------- | :----------- | :---- |
+| `trustedPackages` | `List<String>` | 允许被反序列化的业务类包名前缀列表 | `[]` |
+
+补充说明：
+- 出于防止 RCE 漏洞的考虑，框架默认仅允许反序列化 `java.lang.*`, `java.util.*` 及框架内置模型。如果您的缓存对象在其他包下（例如 `com.yourcompany.domain`），必须将该包名前缀添加到此列表中。
+
 ### Subscriber (Pub/Sub 订阅者线程池配置)
 
 *嵌套在* *`L2Config`* *中，用于控制接收失效消息时的异步处理线程池。*
@@ -303,8 +322,8 @@ sequenceDiagram
 
 | 字段             | 类型         | 含义                         | 默认值             |
 | :------------- | :--------- | :------------------------- | :-------------- |
-| `initialDelay` | `Duration` | 补偿后台任务启动的初始延迟时间            | `10000ms` (10s) |
-| `period`       | `Duration` | 补偿后台任务的执行间隔周期              | `10000ms` (10s) |
+| `initialDelay` | `Duration` | 补偿后台重放任务启动的初始延迟时间          | `10000ms` (10s) |
+| `period`       | `Duration` | 补偿后台重放任务的执行间隔周期            | `10000ms` (10s) |
 | `batchSize`    | `int`      | 每批次从 DB/MQ 抓取并处理的未同步消息最大数量 | `100`           |
 
 ### CacheMiss (缓存未命中与穿透处理配置)
@@ -451,6 +470,7 @@ WHERE id = 1001 AND version = {old_version};
 1. **极致抗热点**：L1 拦截了 90%+ 的热点读请求，彻底消除了 Redis 热点 Key 造成的网络和 CPU 瓶颈，实现秒级响应。
 2. **大容量兜底**：L2 作为海量数据的共享池，保证了应用冷启动时不会击穿到 DB。
 3. **一致性保障**：通过 L2 的 Pub/Sub 机制，当有节点发生数据变更时，框架会自动广播失效消息，精准清除其他节点的 L1 脏数据，在极低成本下兼顾了性能与一致性。
+4. **工业级健壮性**：框架核心链路及并发场景（如 SingleFlight、多级缓存联动）拥有**极高覆盖率的单元测试与集成测试**，并通过本地真实 Redis Cluster 完成了复杂的反序列化（基于白名单防 RCE）、高并发防击穿、突变事件广播的验证，可放心应用于生产环境。
 
 ***
 
