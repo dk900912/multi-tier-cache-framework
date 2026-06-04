@@ -28,7 +28,23 @@
 
 本项目已经发布至 Maven 中央仓库。采用多模块发布方式，通常你需要引入 `cache-core` 核心模块，并根据需求挑选一个 L1 Provider 与一个 L2 Provider；也可以根据需要选择替换默认的 Jackson Codec。
 
-下面是引入最新版本的示例：
+为了方便版本管理，强烈推荐在项目的 `dependencyManagement` 中通过 BOM（Bill of Materials）统一引入版本控制：
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.dk900912</groupId>
+            <artifactId>multi-tier-cache-framework</artifactId>
+            <version>1.0.0-M2</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+随后在依赖中直接引入所需模块（无需再声明 `<version>`）：
 
 ```xml
 <dependencies>
@@ -36,28 +52,24 @@
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-core</artifactId>
-        <version>1.0.0-M2</version>
     </dependency>
 
     <!-- 默认的序列化组件 (如需防 RCE 与解决泛型擦除，强烈建议保留) -->
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-codec</artifactId>
-        <version>1.0.0-M2</version>
     </dependency>
 
     <!-- 选择一个 L1 Provider（例如 Caffeine） -->
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-provider-l1-caffeine</artifactId>
-        <version>1.0.0-M2</version>
     </dependency>
 
     <!-- 选择一个 L2 Provider（例如 Lettuce） -->
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-provider-l2-lettuce</artifactId>
-        <version>1.0.0-M2</version>
     </dependency>
 </dependencies>
 ```
