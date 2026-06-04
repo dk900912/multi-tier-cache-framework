@@ -1,19 +1,22 @@
-# 多级缓存框架
+<div align="center">
+  <h1>多级缓存框架 (Multi-Tier Cache Framework)</h1>
 
-![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square\&logo=openjdk\&logoColor=white)
-![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square\&logo=redis\&logoColor=white)
-![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square\&logo=redis\&logoColor=white)
-![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
-![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
+  ![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square&logo=openjdk&logoColor=white)
+  ![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square&logo=redis&logoColor=white)
+  ![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
+  ![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
+  ![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
 
-![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
-![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square\&logo=google\&logoColor=white)
-![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square\&logo=openjdk\&logoColor=white)
-![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square\&logo=redis\&logoColor=white)
-![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
-![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square\&logo=redis\&logoColor=white)
+  ![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
+  ![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square&logo=google&logoColor=white)
+  ![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square&logo=openjdk&logoColor=white)
+  ![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square&logo=redis&logoColor=white)
+  ![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
+  ![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square&logo=redis&logoColor=white)
+  [![Maven Central](https://img.shields.io/maven-central/v/io.github.dk900912/multi-tier-cache-framework?style=flat-square&color=blue)](https://central.sonatype.com/search?q=io.github.dk900912)
 
-一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。
+  <p>一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。</p>
+</div>
 
 ## 1. 接入指南
 
@@ -23,7 +26,9 @@
 
 ### Maven 依赖
 
-项目采用多模块发布方式。通常你需要引入 `cache-core` 核心模块，并根据需求挑选一个 L1 Provider 与一个 L2 Provider；下面示例直接显式声明统一版本号。
+本项目已经发布至 Maven 中央仓库。采用多模块发布方式，通常你需要引入 `cache-core` 核心模块，并根据需求挑选一个 L1 Provider 与一个 L2 Provider；也可以根据需要选择替换默认的 Jackson Codec。
+
+下面是引入最新版本的示例：
 
 ```xml
 <dependencies>
@@ -31,21 +36,28 @@
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-core</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0-M2</version>
+    </dependency>
+
+    <!-- 默认的序列化组件 (如需防 RCE 与解决泛型擦除，强烈建议保留) -->
+    <dependency>
+        <groupId>io.github.dk900912</groupId>
+        <artifactId>cache-codec</artifactId>
+        <version>1.0.0-M2</version>
     </dependency>
 
     <!-- 选择一个 L1 Provider（例如 Caffeine） -->
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-provider-l1-caffeine</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0-M2</version>
     </dependency>
 
     <!-- 选择一个 L2 Provider（例如 Lettuce） -->
     <dependency>
         <groupId>io.github.dk900912</groupId>
         <artifactId>cache-provider-l2-lettuce</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0-M2</version>
     </dependency>
 </dependencies>
 ```
@@ -202,7 +214,7 @@ sequenceDiagram
     CacheManager->>Database: loader.load() (回源查库)
     Database-->>CacheManager: 获得数据及版本号
     
-    CacheManager->>L2Cache: 回填 L2 (设定 L2 TTL)
+    CacheManager->>L2Cache: 回填 L2 (判断是 Backfill 还是 Penetration 设定 TTL)
     CacheManager->>L1Cache: 回填 L1 (L1过期受本地配置管控)
     
     CacheManager-->>SingleFlight: 返回结果
@@ -228,7 +240,7 @@ sequenceDiagram
     CacheManager->>L1Cache_NodeA: invalidate(key) (主动清除本地L1)
     
     CacheManager->>L2Cache_Redis: eval(UPSERT_LUA_SCRIPT)
-    Note over L2Cache_Redis: Lua 脚本以原子方式:<br/>1. 更新 L2 负载<br/>2. 向指定 Channel PUBLISH 失效消息
+    Note over L2Cache_Redis: Lua 脚本以原子方式:<br/>1. 校验版本号<br/>2. 更新 L2 负载<br/>3. 向指定 Channel PUBLISH 失效消息
     
     L2Cache_Redis-->>L1Cache_NodeB: Pub/Sub 广播 (Channel Message)
     Note over L1Cache_NodeB: 其他节点监听器收到变更通知
