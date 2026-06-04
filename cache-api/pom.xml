@@ -10,12 +10,13 @@
     </parent>
 
     <artifactId>cache-api</artifactId>
+    <name>cache-api</name>
+    <description>The API module of multi-tier-cache-framework</description>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.12.2</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

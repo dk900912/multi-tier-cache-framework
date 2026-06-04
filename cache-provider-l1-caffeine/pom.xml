@@ -10,6 +10,8 @@
     </parent>
 
     <artifactId>cache-provider-l1-caffeine</artifactId>
+    <name>cache-provider-l1-caffeine</name>
+    <description>The Caffeine L1 Provider module of multi-tier-cache-framework</description>
 
     <dependencies>
         <dependency>
@@ -23,8 +25,6 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.12.2</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

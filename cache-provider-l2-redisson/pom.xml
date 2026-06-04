@@ -10,6 +10,8 @@
     </parent>
 
     <artifactId>cache-provider-l2-redisson</artifactId>
+    <name>cache-provider-l2-redisson</name>
+    <description>The Redisson L2 Provider module of multi-tier-cache-framework</description>
 
     <dependencies>
         <dependency>
@@ -23,8 +25,6 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.12.2</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

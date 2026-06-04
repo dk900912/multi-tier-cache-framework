@@ -10,6 +10,8 @@
     </parent>
 
     <artifactId>cache-codec</artifactId>
+    <name>cache-codec</name>
+    <description>The Codec module of multi-tier-cache-framework</description>
 
     <dependencies>
         <dependency>
@@ -27,18 +29,7 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.12.2</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.4</version>
-            </plugin>
-        </plugins>
-    </build>
 </project>
