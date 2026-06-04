@@ -1,19 +1,19 @@
 <div align="center">
   <h1>多级缓存框架 (Multi-Tier Cache Framework)</h1>
 
-  ![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square&logo=openjdk&logoColor=white)
-  ![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square&logo=redis&logoColor=white)
-  ![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
-  ![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
-  ![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
+![Java 21+](https://img.shields.io/badge/Java-21%2B-4374E0?style=flat-square&logo=openjdk&logoColor=white)
+![Redis Cluster](https://img.shields.io/badge/Redis-Cluster-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
+![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
+![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
 
-  ![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
-  ![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square&logo=google&logoColor=white)
-  ![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square&logo=openjdk&logoColor=white)
-  ![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square&logo=redis&logoColor=white)
-  ![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
-  ![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square&logo=redis&logoColor=white)
-  [![Maven Central](https://img.shields.io/maven-central/v/io.github.dk900912/multi-tier-cache-framework?style=flat-square&color=blue)](https://central.sonatype.com/search?q=io.github.dk900912)
+![Caffeine](https://img.shields.io/badge/L1-Caffeine-6C5CE7?style=flat-square)
+![Guava](https://img.shields.io/badge/L1-Guava-4285F4?style=flat-square&logo=google&logoColor=white)
+![JDK L1](https://img.shields.io/badge/L1-JDK-2C3E50?style=flat-square&logo=openjdk&logoColor=white)
+![Jedis](https://img.shields.io/badge/L2-Jedis-C0392B?style=flat-square&logo=redis&logoColor=white)
+![Lettuce](https://img.shields.io/badge/L2-Lettuce-27AE60?style=flat-square)
+![Redisson](https://img.shields.io/badge/L2-Redisson-7F8C8D?style=flat-square&logo=redis&logoColor=white)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.dk900912/multi-tier-cache-framework?style=flat-square&color=blue)](https://central.sonatype.com/search?q=io.github.dk900912)
 
   <p>一个专为 Java 应用程序设计的高性能、健壮且高度可扩展的多级缓存框架。</p>
 </div>
@@ -32,15 +32,15 @@
 
 ```xml
 <dependencyManagement>
-    <dependencies>
-        <dependency>
-            <groupId>io.github.dk900912</groupId>
-            <artifactId>multi-tier-cache-framework</artifactId>
-            <version>1.0.0-M2</version>
-            <type>pom</type>
-            <scope>import</scope>
-        </dependency>
-    </dependencies>
+  <dependencies>
+    <dependency>
+      <groupId>io.github.dk900912</groupId>
+      <artifactId>multi-tier-cache-framework</artifactId>
+      <version>1.0.0-M2</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
 </dependencyManagement>
 ```
 
@@ -48,29 +48,29 @@
 
 ```xml
 <dependencies>
-    <!-- 核心框架 -->
-    <dependency>
-        <groupId>io.github.dk900912</groupId>
-        <artifactId>cache-core</artifactId>
-    </dependency>
+  <!-- 核心框架 -->
+  <dependency>
+    <groupId>io.github.dk900912</groupId>
+    <artifactId>cache-core</artifactId>
+  </dependency>
 
-    <!-- 默认的序列化组件 (如需防 RCE 与解决泛型擦除，强烈建议保留) -->
-    <dependency>
-        <groupId>io.github.dk900912</groupId>
-        <artifactId>cache-codec</artifactId>
-    </dependency>
+  <!-- 默认的序列化组件 (如需防 RCE 与解决泛型擦除，强烈建议保留) -->
+  <dependency>
+    <groupId>io.github.dk900912</groupId>
+    <artifactId>cache-codec</artifactId>
+  </dependency>
 
-    <!-- 选择一个 L1 Provider（例如 Caffeine） -->
-    <dependency>
-        <groupId>io.github.dk900912</groupId>
-        <artifactId>cache-provider-l1-caffeine</artifactId>
-    </dependency>
+  <!-- 选择一个 L1 Provider（例如 Caffeine） -->
+  <dependency>
+    <groupId>io.github.dk900912</groupId>
+    <artifactId>cache-provider-l1-caffeine</artifactId>
+  </dependency>
 
-    <!-- 选择一个 L2 Provider（例如 Lettuce） -->
-    <dependency>
-        <groupId>io.github.dk900912</groupId>
-        <artifactId>cache-provider-l2-lettuce</artifactId>
-    </dependency>
+  <!-- 选择一个 L2 Provider（例如 Lettuce） -->
+  <dependency>
+    <groupId>io.github.dk900912</groupId>
+    <artifactId>cache-provider-l2-lettuce</artifactId>
+  </dependency>
 </dependencies>
 ```
 
@@ -85,55 +85,55 @@ import java.time.Duration;
 import java.util.List;
 
 public class CacheExample {
-    public static void main(String[] args) {
-        CacheConfig config = new CacheConfig();
-        
-        // 配置 L1 本地缓存
-        config.getL1().setEnabled(true);
-        config.getL1().setMaximumSize(10_000L);
-        config.getL1().setExpireAfterWrite(Duration.ofMinutes(10));
-        
-        // 配置 L2 分布式缓存
-        config.getL2().setEnabled(true);
-        config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
-        config.getL2().setMutationChannelName("cache:mutation");
-        
-        // 强烈建议：将业务包加入防 RCE 序列化白名单，防止反序列化拦截
-        config.getCodec().setTrustedPackages(List.of("com.yourcompany.domain"));
-        
-        // 创建并启动 CacheManager
-        CacheManager cacheManager = CacheManagerFactory.create(config);
-        cacheManager.bootstrap();
-        
-        // --- 核心业务使用示例（模拟 userRepository 的真实调用） ---
-        String userId = "user:1001";
-        
-        // 1. Insert: 数据库插入后，获取到刚生成的实体及版本号，写入缓存
-        User newUser = userRepository.insert(new User("Alice"));
-        cacheManager.insert(CacheKey.simple(userId), newUser, newUser.getVersion(), Duration.ofMinutes(30));
-        
-        // 2. Get: 查询缓存 (将直接命中刚才的 insert)
-        User user = cacheManager.get(
-            CacheKey.simple(userId), 
-            () -> userRepository.findById(1001L), 
+  public static void main(String[] args) {
+    CacheConfig config = new CacheConfig();
+
+    // 配置 L1 本地缓存
+    config.getL1().setEnabled(true);
+    config.getL1().setMaximumSize(10_000L);
+    config.getL1().setExpireAfterWrite(Duration.ofMinutes(10));
+
+    // 配置 L2 分布式缓存
+    config.getL2().setEnabled(true);
+    config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
+    config.getL2().setMutationChannelName("cache:mutation");
+
+    // 强烈建议：将业务包加入防 RCE 序列化白名单，防止反序列化拦截
+    config.getCodec().setTrustedPackages(List.of("com.yourcompany.domain"));
+
+    // 创建并启动 CacheManager
+    CacheManager cacheManager = CacheManagerFactory.create(config);
+    cacheManager.bootstrap();
+
+    // --- 核心业务使用示例（模拟 userRepository 的真实调用） ---
+    String userId = "user:1001";
+
+    // 1. Insert: 数据库插入后，获取到刚生成的实体及版本号，写入缓存
+    User newUser = userRepository.insert(new User("Alice"));
+    cacheManager.insert(CacheKey.simple(userId), newUser, newUser.getVersion(), Duration.ofMinutes(30));
+
+    // 2. Get: 查询缓存 (将直接命中刚才的 insert)
+    User user = cacheManager.get(
+            CacheKey.simple(userId),
+            () -> userRepository.findById(1001L),
             Duration.ofMinutes(30)
-        );
-        System.out.println("Cached Value: " + user.getName());
-        
-        // 3. Update: 模拟 DB 乐观锁更新成功后，获取最新版本号更新缓存
-        User updatedUser = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
-        if (updatedUser != null) {
-            cacheManager.update(CacheKey.simple(userId), updatedUser, updatedUser.getVersion(), Duration.ofMinutes(30));
-        }
-        
-        // 4. Evict: 模拟 DB 删除，先查出当前版本号（或在删除时返回），然后驱逐缓存
-        Long currentVersion = userRepository.findById(1001L).getVersion();
-        userRepository.deleteById(1001L);
-        cacheManager.evict(CacheKey.simple(userId), currentVersion + 1, Duration.ofMinutes(5));
-        
-        // 安全关闭，释放底层线程和资源
-        cacheManager.shutdown();
+    );
+    System.out.println("Cached Value: " + user.getName());
+
+    // 3. Update: 模拟 DB 乐观锁更新成功后，获取最新版本号更新缓存
+    User updatedUser = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
+    if (updatedUser != null) {
+      cacheManager.update(CacheKey.simple(userId), updatedUser, updatedUser.getVersion(), Duration.ofMinutes(30));
     }
+
+    // 4. Evict: 模拟 DB 删除，先查出当前版本号（或在删除时返回），然后驱逐缓存
+    Long currentVersion = userRepository.findById(1001L).getVersion();
+    userRepository.deleteById(1001L);
+    cacheManager.evict(CacheKey.simple(userId), currentVersion + 1, Duration.ofMinutes(5));
+
+    // 安全关闭，释放底层线程和资源
+    cacheManager.shutdown();
+  }
 }
 ```
 
@@ -233,7 +233,36 @@ sequenceDiagram
     SingleFlight-->>Client: 唤醒并返回数据给所有被阻塞的线程
 ```
 
-### 4.2 `update` 修改操作（带有 Pub/Sub 广播失效机制）
+### 4.2 `insert` 新增操作（带有 Pub/Sub 广播失效机制）
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant DB
+    participant CacheManager
+    participant L1Cache_NodeA
+    participant L2Cache_Redis
+    participant L1Cache_NodeB
+
+    Client->>DB: 插入数据库数据
+    DB-->>Client: 成功，返回数据和版本号
+    
+    Client->>CacheManager: insert(key, data, version, ttl)
+    
+    CacheManager->>L1Cache_NodeA: invalidate(key) (主动清除本地L1)
+    
+    CacheManager->>L2Cache_Redis: eval(UPSERT_LUA_SCRIPT)
+    Note over L2Cache_Redis: Lua 脚本以原子方式:<br/>1. 若不存在则直接写入<br/>2. 若存在则比对版本号<br/>3. 向指定 Channel PUBLISH 失效消息
+    
+    L2Cache_Redis-->>L1Cache_NodeB: Pub/Sub 广播 (Channel Message)
+    Note over L1Cache_NodeB: 其他节点监听器收到变更通知
+    L1Cache_NodeB->>L1Cache_NodeB: invalidate(key) (清除本地L1)
+    
+    L2Cache_Redis-->>CacheManager: 成功
+    CacheManager-->>Client: 成功
+```
+
+### 4.3 `update` 修改操作（带有 Pub/Sub 广播失效机制）
 
 ```mermaid
 sequenceDiagram
@@ -253,6 +282,35 @@ sequenceDiagram
     
     CacheManager->>L2Cache_Redis: eval(UPSERT_LUA_SCRIPT)
     Note over L2Cache_Redis: Lua 脚本以原子方式:<br/>1. 校验版本号<br/>2. 更新 L2 负载<br/>3. 向指定 Channel PUBLISH 失效消息
+    
+    L2Cache_Redis-->>L1Cache_NodeB: Pub/Sub 广播 (Channel Message)
+    Note over L1Cache_NodeB: 其他节点监听器收到变更通知
+    L1Cache_NodeB->>L1Cache_NodeB: invalidate(key) (清除本地L1)
+    
+    L2Cache_Redis-->>CacheManager: 成功
+    CacheManager-->>Client: 成功
+```
+
+### 4.4 `evict` / `delete` 删除操作（带有空值墓碑与广播机制）
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant DB
+    participant CacheManager
+    participant L1Cache_NodeA
+    participant L2Cache_Redis
+    participant L1Cache_NodeB
+
+    Client->>DB: 删除数据库数据
+    DB-->>Client: 成功
+    
+    Client->>CacheManager: evict(key, version, ttl)
+    
+    CacheManager->>L1Cache_NodeA: invalidate(key) (主动清除本地L1)
+    
+    CacheManager->>L2Cache_Redis: eval(DELETE_LUA_SCRIPT)
+    Note over L2Cache_Redis: Lua 脚本以原子方式:<br/>1. 校验版本号<br/>2. 写入空值墓碑(防并发查库产生脏数据)<br/>3. 向指定 Channel PUBLISH 失效消息
     
     L2Cache_Redis-->>L1Cache_NodeB: Pub/Sub 广播 (Channel Message)
     Note over L1Cache_NodeB: 其他节点监听器收到变更通知
@@ -396,8 +454,8 @@ sequenceDiagram
 
 **最佳实践**：在更新数据库时，强烈建议采用**乐观锁**机制来保证版本号的严格单调递增。例如执行更新时：
 ```sql
-UPDATE product_stock 
-SET stock = 0, locked = 0, available = 0, version = version + 1 
+UPDATE product_stock
+SET stock = 0, locked = 0, available = 0, version = version + 1
 WHERE id = 1001 AND version = {old_version};
 ```
 只有数据库更新成功，才能提取到最新的 `version` 并调用 `cacheManager.update(...)`，从而从根本上保证并发场景下的时序安全。
@@ -434,8 +492,8 @@ WHERE id = 1001 AND version = {old_version};
 
 本框架没有默认提供基于分布式锁的全局防击穿，最主要的一个考量：**不要让缓存框架掩盖 DB 的真实病灶**。如果数据库连几十个节点的并发读请求都扛不住，那真正的问题绝对不是缓存击穿，而是：
 
-   - 回源查询的 SQL 是一条极其消耗 CPU 的慢查询（例如缺少索引、大表 Join、深度分页）。
-   - 数据库本身的配置或硬件资源已经到了物理极限，需要考虑读写分离或分库分表。
+- 回源查询的 SQL 是一条极其消耗 CPU 的慢查询（例如缺少索引、大表 Join、深度分页）。
+- 数据库本身的配置或硬件资源已经到了物理极限，需要考虑读写分离或分库分表。
 
 #### 💡 拓展建议：如何实现“全局唯一回源”？
 
@@ -448,13 +506,13 @@ WHERE id = 1001 AND version = {old_version};
 > 1. 先 readFromL1(key)
 > 2. 再 readFromL2(key)
 > 3. 都 miss 才进入 loadWithSingleFlight(...)，然后在 loadAsSingleFlightOwner 里，作为 singleflight owner，又会再做一轮 quiet 重试：
->    - readFromL1(key, true)
+     >    - readFromL1(key, true)
 >    - readFromL2(key, true)
 > 4. 最后才执行 loader.load()
->    这里最关键的一行是：
+     >    这里最关键的一行是：
+     >
+     >    - loader.load()
 >
->    - loader.load()
->   
 > 所以严格来说：用户自定义 CacheLoader 并不需要考虑`double check`， 而是 框架先替你用了两轮，再把执行权交给你，最终你只需要聚焦分布式锁逻辑即可！
 
 ***
@@ -462,15 +520,15 @@ WHERE id = 1001 AND version = {old_version};
 ### 6.4 为什么不调用 `cacheManager.shutdown()`，JVM 进程也会自动退出？
 
 - 当前框架自己创建的后台线程，明确就是 daemon：
-    - 补偿线程在 [CacheManagerFactory](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-core/src/main/java/io/github/dk900912/multitiercache/core/CacheManagerFactory.java#L50-L54)
-    - Jedis/Lettuce/Redisson 的消息处理线程也都 `setDaemon(true)` 了：
-        - [JedisL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-jedis/src/main/java/io/github/dk900912/multitiercache/provider/jedis/JedisL2Provider.java#L82-L93)
-        - [LettuceL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-lettuce/src/main/java/io/github/dk900912/multitiercache/provider/lettuce/LettuceL2Provider.java#L70-L81)
-        - [RedissonL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-redisson/src/main/java/io/github/dk900912/multitiercache/provider/redisson/RedissonL2Provider.java#L81-L92)
+  - 补偿线程在 [CacheManagerFactory](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-core/src/main/java/io/github/dk900912/multitiercache/core/CacheManagerFactory.java#L50-L54)
+  - Jedis/Lettuce/Redisson 的消息处理线程也都 `setDaemon(true)` 了：
+    - [JedisL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-jedis/src/main/java/io/github/dk900912/multitiercache/provider/jedis/JedisL2Provider.java#L82-L93)
+    - [LettuceL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-lettuce/src/main/java/io/github/dk900912/multitiercache/provider/lettuce/LettuceL2Provider.java#L70-L81)
+    - [RedissonL2Provider](file:///c:/Users/dk900/Idea%20Projects/multi-tier-cache-framework/cache-provider-l2-redisson/src/main/java/io/github/dk900912/multitiercache/provider/redisson/RedissonL2Provider.java#L81-L92)
 - JVM 规则就是：
-    - **只要所有非守护线程结束了**
-    - **只剩 daemon 线程**
-    - **进程就会退出**
+  - **只要所有非守护线程结束了**
+  - **只剩 daemon 线程**
+  - **进程就会退出**
 
 简单 main 场景中即使不调用 shutdown()，JVM 通常也会自动退出；这属于守护线程模型带来的现象，不应作为资源管理契约依赖。
 
@@ -520,20 +578,20 @@ WHERE id = 1001 AND version = {old_version};
 local current = redis.call('GET', KEYS[1])
 local ttlMillis = tonumber(ARGV[2])
 if not current then
-    -- 如果缓存中没有该数据，直接 SET 并 PUBLISH
-    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
-    redis.call('PUBLISH', ARGV[4], ARGV[1])
-    return 1
+  -- 如果缓存中没有该数据，直接 SET 并 PUBLISH
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+  redis.call('PUBLISH', ARGV[4], ARGV[1])
+  return 1
 end
 -- 如果缓存已存在，比对版本号
 local newVersion = tonumber(ARGV[3])
 local currentPayload = cjson.decode(current)
 local currentVersion = tonumber(currentPayload.version)
 if newVersion > currentVersion then
-    -- 新版本更大，允许更新 L2 并广播失效消息
-    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
-    redis.call('PUBLISH', ARGV[4], ARGV[1])
-    return 1
+  -- 新版本更大，允许更新 L2 并广播失效消息
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+  redis.call('PUBLISH', ARGV[4], ARGV[1])
+  return 1
 end
 -- 版本号落后，忽略此次更新
 return 0
@@ -545,19 +603,19 @@ return 0
 local current = redis.call('GET', KEYS[1])
 local ttlMillis = tonumber(ARGV[2])
 if not current then
-    -- 为了防止“并发查库+删除”导致的脏数据，即使当前缓存不存在，也写入墓碑值并 PUBLISH
-    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
-    redis.call('PUBLISH', ARGV[4], ARGV[1])
-    return 1
+  -- 为了防止“并发查库+删除”导致的脏数据，即使当前缓存不存在，也写入墓碑值并 PUBLISH
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+  redis.call('PUBLISH', ARGV[4], ARGV[1])
+  return 1
 end
 local newVersion = tonumber(ARGV[3])
 local currentPayload = cjson.decode(current)
 local currentVersion = tonumber(currentPayload.version)
 -- 注意这里的区别：删除操作允许版本号相等 (>=)
 if newVersion >= currentVersion then
-    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
-    redis.call('PUBLISH', ARGV[4], ARGV[1])
-    return 1
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
+  redis.call('PUBLISH', ARGV[4], ARGV[1])
+  return 1
 end
 return 0
 ```
