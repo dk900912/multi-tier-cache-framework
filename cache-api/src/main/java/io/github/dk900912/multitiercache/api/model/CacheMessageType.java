@@ -21,4 +21,16 @@ public enum CacheMessageType {
     public String getWireValue() {
         return wireValue;
     }
+
+    public static CacheMessageType fromWireValue(String wireValue) {
+        if (wireValue == null) {
+            throw new IllegalArgumentException("CacheMessageType cannot be null");
+        }
+        for (CacheMessageType type : values()) {
+            if (type.getWireValue().equalsIgnoreCase(wireValue)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unsupported CacheMessageType: " + wireValue);
+    }
 }

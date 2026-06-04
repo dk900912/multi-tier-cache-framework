@@ -6,7 +6,7 @@ import io.github.dk900912.multitiercache.api.CacheMessageListener;
 import io.github.dk900912.multitiercache.api.CacheMessageRepository;
 import io.github.dk900912.multitiercache.api.CacheMessageSubscription;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
-import io.github.dk900912.multitiercache.codec.CacheCodec;
+import io.github.dk900912.multitiercache.spi.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
 import io.github.dk900912.multitiercache.spi.L2Provider;
 import org.slf4j.Logger;
@@ -40,8 +40,8 @@ public class CacheManagerFactory {
         L1Provider l1Provider = createL1Provider(cacheConfig);
         L2Provider l2Provider = createL2Provider(cacheConfig);
         CacheMessageRepository cacheMessageRepository = createCacheMessageRepository();
+        CacheCodec cacheCodec = createCacheCodec(cacheConfig);
 
-        CacheCodec cacheCodec = new CacheCodec();
         SingleFlight singleFlight = new SingleFlight();
 
         DefaultCacheManager cacheManager = new DefaultCacheManager(
@@ -118,6 +118,25 @@ public class CacheManagerFactory {
         CacheMessageRepository repository = repositories.getFirst();
         LOGGER.info("Selected CacheMessageRepository: {}", repository.getClass().getName());
         return repository;
+    }
+
+    private static CacheCodec createCacheCodec(CacheConfig cacheConfig) {
+        List<CacheCodec> codecs = loadProviders(CacheCodec.class);
+        if (codecs.isEmpty()) {
+            throw new IllegalStateException("No CacheCodec was loaded through SPI");
+        }
+        if (codecs.size() > 1) {
+            throw new IllegalStateException("Multiple CacheCodec implementations were loaded through SPI: "
+                    + codecs.stream().map(c -> c.getClass().getName()).toList());
+        }
+        CacheCodec codec = codecs.getFirst();
+        try {
+            codec.initialize(cacheConfig);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to initialize CacheCodec: " + codec.getClass().getName(), e);
+        }
+        LOGGER.info("Selected CacheCodec: {}", codec.getClass().getName());
+        return codec;
     }
 
     private static void initializeL1Provider(L1Provider provider, CacheConfig.L1Config config) {

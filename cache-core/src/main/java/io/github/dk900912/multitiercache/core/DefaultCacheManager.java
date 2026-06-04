@@ -11,7 +11,7 @@ import io.github.dk900912.multitiercache.api.model.CacheLoadResult;
 import io.github.dk900912.multitiercache.api.model.CacheMessage;
 import io.github.dk900912.multitiercache.api.model.CacheMessageType;
 import io.github.dk900912.multitiercache.api.model.L1CacheStats;
-import io.github.dk900912.multitiercache.codec.CacheCodec;
+import io.github.dk900912.multitiercache.spi.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
 import io.github.dk900912.multitiercache.spi.L2Provider;
 import org.slf4j.Logger;

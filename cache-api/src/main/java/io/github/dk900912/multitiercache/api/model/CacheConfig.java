@@ -18,6 +18,7 @@ public class CacheConfig {
 
     private L1Config l1 = new L1Config();
     private L2Config l2 = new L2Config();
+    private CodecConfig codec = new CodecConfig();
     private SingleFlight singleFlight = new SingleFlight();
     private Compensation compensation = new Compensation();
     private CacheMiss cacheMiss = new CacheMiss();
@@ -39,6 +40,14 @@ public class CacheConfig {
 
     public void setL2(L2Config l2) {
         this.l2 = l2;
+    }
+
+    public CodecConfig getCodec() {
+        return codec;
+    }
+
+    public void setCodec(CodecConfig codec) {
+        this.codec = codec;
     }
 
     public SingleFlight getSingleFlight() {
@@ -63,6 +72,24 @@ public class CacheConfig {
 
     public void setCacheMiss(CacheMiss cacheMiss) {
         this.cacheMiss = cacheMiss;
+    }
+
+    /**
+     * Configuration for Cache Codec.
+     */
+    public static class CodecConfig {
+        /**
+         * List of trusted package prefixes for deserialization white-listing.
+         */
+        private List<String> trustedPackages = new java.util.ArrayList<>();
+
+        public List<String> getTrustedPackages() {
+            return trustedPackages;
+        }
+
+        public void setTrustedPackages(List<String> trustedPackages) {
+            this.trustedPackages = trustedPackages;
+        }
     }
 
     /**

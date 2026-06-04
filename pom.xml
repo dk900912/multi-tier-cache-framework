@@ -6,7 +6,7 @@
 
     <groupId>io.github.dk900912</groupId>
     <artifactId>multi-tier-cache-framework</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0-M2</version>
     <packaging>pom</packaging>
 
     <name>multi-tier-cache-framework</name>
@@ -235,7 +235,6 @@
                 <extensions>true</extensions>
                 <configuration>
                     <publishingServerId>ossrh</publishingServerId>
-                    <tokenAuth>true</tokenAuth>
                     <autoPublish>true</autoPublish>
                 </configuration>
             </plugin>
