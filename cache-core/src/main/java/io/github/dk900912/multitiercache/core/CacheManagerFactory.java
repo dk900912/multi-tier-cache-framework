@@ -43,9 +43,10 @@ public class CacheManagerFactory {
         CacheCodec cacheCodec = createCacheCodec(cacheConfig);
 
         SingleFlight singleFlight = new SingleFlight();
+        CacheRuntimeMetricsRecorder runtimeMetrics = new CacheRuntimeMetricsRecorder();
 
         DefaultCacheManager cacheManager = new DefaultCacheManager(
-                cacheConfig, l1Provider, l2Provider, cacheMessageRepository, cacheCodec, singleFlight);
+                cacheConfig, l1Provider, l2Provider, cacheMessageRepository, cacheCodec, singleFlight, runtimeMetrics);
 
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "cache-message-replayer");
@@ -54,7 +55,7 @@ public class CacheManagerFactory {
         });
 
         CacheMessageReplayer cacheMessageReplayer = new CacheMessageReplayer(
-                cacheMessageRepository, cacheManager, cacheConfig, scheduler);
+                cacheMessageRepository, cacheManager, cacheConfig, scheduler, runtimeMetrics);
 
         return new LifecycleAwareCacheManager(cacheManager, cacheMessageReplayer);
     }

@@ -113,23 +113,23 @@ public class JedisL2Provider implements L2Provider, AutoCloseable {
     @Override
     public String get(CacheKey key) {
         ensureInitialized();
-        return redisClient.get(key.toRedisKey());
+        return redisClient.get(key.toKeyString());
     }
 
     @Override
     public void set(CacheKey key, String value, Duration ttl) {
         ensureInitialized();
         if (ttl != null && ttl.toMillis() > 0) {
-            redisClient.set(key.toRedisKey(), value, SetParams.setParams().px(ttl.toMillis()));
+            redisClient.set(key.toKeyString(), value, SetParams.setParams().px(ttl.toMillis()));
         } else {
-            redisClient.set(key.toRedisKey(), value);
+            redisClient.set(key.toKeyString(), value);
         }
     }
 
     @Override
     public void delete(CacheKey key) {
         ensureInitialized();
-        redisClient.del(key.toRedisKey());
+        redisClient.del(key.toKeyString());
     }
 
     @Override

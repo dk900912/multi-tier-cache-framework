@@ -18,7 +18,7 @@ public interface CacheKey {
      *
      * @return the string representation of the cache key
      */
-    String toRedisKey();
+    String toKeyString();
 
     public static CacheKey simple(String key) {
         return () -> key;

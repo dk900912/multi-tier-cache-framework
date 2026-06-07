@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BiFunction;
 
 
 /**
@@ -55,7 +56,7 @@ public class JdkL1Provider implements L1Provider {
         ensureInitialized();
         lock.lock();
         try {
-            String keyString = key.toRedisKey();
+            String keyString = key.toKeyString();
             CacheEntry entry = cache.get(keyString);
             if (entry == null) {
                 return null;
@@ -79,7 +80,7 @@ public class JdkL1Provider implements L1Provider {
         ensureInitialized();
         lock.lock();
         try {
-            String keyString = key.toRedisKey();
+            String keyString = key.toKeyString();
             long now = System.currentTimeMillis();
             cache.put(keyString, new CacheEntry(value, now, now));
         } finally {
@@ -92,7 +93,42 @@ public class JdkL1Provider implements L1Provider {
         ensureInitialized();
         lock.lock();
         try {
-            cache.remove(key.toRedisKey());
+            cache.remove(key.toKeyString());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public Object compute(CacheKey key, BiFunction<CacheKey, Object, Object> remappingFunction) {
+        ensureInitialized();
+        lock.lock();
+        try {
+            String keyString = key.toKeyString();
+            long now = System.currentTimeMillis();
+            
+            // Get current value (checking for expiration)
+            CacheEntry entry = cache.get(keyString);
+            Object currentValue = null;
+            if (entry != null) {
+                if (isExpired(entry, now)) {
+                    cache.remove(keyString);
+                } else {
+                    currentValue = entry.value;
+                }
+            }
+            
+            // Compute new value
+            Object newValue = remappingFunction.apply(key, currentValue);
+            
+            // Update cache based on new value
+            if (newValue != null) {
+                cache.put(keyString, new CacheEntry(newValue, now, now));
+            } else if (entry != null) {
+                cache.remove(keyString);
+            }
+            
+            return newValue;
         } finally {
             lock.unlock();
         }

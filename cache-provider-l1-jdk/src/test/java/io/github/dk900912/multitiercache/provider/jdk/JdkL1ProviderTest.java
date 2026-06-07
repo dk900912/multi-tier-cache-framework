@@ -54,6 +54,62 @@ class JdkL1ProviderTest {
         assertEquals(0, internalSize(provider));
     }
 
+    @Test
+    void shouldComputeNewValueWhenKeyDoesNotExist() {
+        JdkL1Provider provider = new JdkL1Provider(10L, null, null);
+
+        Object result = provider.compute(CacheKey.simple("k1"), (k, oldValue) -> {
+            assertNull(oldValue);
+            return "v1";
+        });
+
+        assertEquals("v1", result);
+        assertEquals("v1", provider.get(CacheKey.simple("k1")));
+    }
+
+    @Test
+    void shouldComputeNewValueBasedOnOldValue() {
+        JdkL1Provider provider = new JdkL1Provider(10L, null, null);
+
+        provider.put(CacheKey.simple("k1"), "v1");
+
+        Object result = provider.compute(CacheKey.simple("k1"), (k, oldValue) -> {
+            assertEquals("v1", oldValue);
+            return "v2";
+        });
+
+        assertEquals("v2", result);
+        assertEquals("v2", provider.get(CacheKey.simple("k1")));
+    }
+
+    @Test
+    void shouldRemoveEntryWhenComputeReturnsNull() {
+        JdkL1Provider provider = new JdkL1Provider(10L, null, null);
+
+        provider.put(CacheKey.simple("k1"), "v1");
+
+        Object result = provider.compute(CacheKey.simple("k1"), (k, oldValue) -> {
+            assertEquals("v1", oldValue);
+            return null;
+        });
+
+        assertNull(result);
+        assertNull(provider.get(CacheKey.simple("k1")));
+    }
+
+    @Test
+    void shouldNotCreateEntryWhenComputeReturnsNullForNonExistentKey() {
+        JdkL1Provider provider = new JdkL1Provider(10L, null, null);
+
+        Object result = provider.compute(CacheKey.simple("k1"), (k, oldValue) -> {
+            assertNull(oldValue);
+            return null;
+        });
+
+        assertNull(result);
+        assertNull(provider.get(CacheKey.simple("k1")));
+    }
+
     @SuppressWarnings("unchecked")
     private static int internalSize(JdkL1Provider provider) throws Exception {
         Field field = JdkL1Provider.class.getDeclaredField("cache");

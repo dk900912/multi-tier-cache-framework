@@ -57,7 +57,7 @@ public class JacksonCacheCodec implements CacheCodec {
                 .allowIfSubType("java.util.")
                 .allowIfSubType("java.lang.");
 
-        if (trustedPackages != null) {
+        if (trustedPackages != null && !trustedPackages.isEmpty()) {
             for (String pkg : trustedPackages) {
                 ptvBuilder.allowIfSubType(pkg);
             }
@@ -106,7 +106,8 @@ public class JacksonCacheCodec implements CacheCodec {
         });
         module.addDeserializer(CacheMessageType.class, new JsonDeserializer<>() {
             @Override
-            public CacheMessageType deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            public CacheMessageType deserialize(JsonParser parser, DeserializationContext context)
+                    throws IOException {
                 return CacheMessageType.fromWireValue(parser.getValueAsString());
             }
         });

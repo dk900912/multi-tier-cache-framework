@@ -22,16 +22,24 @@ public class DefaultCacheMessageRepository implements CacheMessageRepository {
 
     @Override
     public void save(CacheMessage<?> message) {
-        LOGGER.warn("Cache mutation failed and no custom LocalEventStore is configured. message={}", message);
+        LOGGER.info("Skipping cache message persistence because no custom CacheMessageRepository is configured. message={}", message);
     }
 
     @Override
     public List<CacheMessage<?>> fetchUnprocessed(int limit) {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Fetching unprocessed messages ignored. Always returns empty list in default implementation. limit={}", limit);
+        }
         return Collections.emptyList();
     }
 
     @Override
-    public void markProcessed(String key, Long version) {
-        LOGGER.debug("Ignoring processed mark in default LocalEventStore. key={}, version={}", key, version);
+    public void markProcessed(String key, Long generation, Long version) {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug(
+                    "Ignore marking message as processed in default repository. [key={}, generation={}, version={}]",
+                    key, generation, version
+            );
+        }
     }
 }

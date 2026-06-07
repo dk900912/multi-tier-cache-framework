@@ -7,7 +7,9 @@ import java.util.List;
 /**
  * Service Provider Interface (SPI) for storing and managing cache messages locally.
  * <p>
- * Used primarily for compensating failed Pub/Sub propagations or L2 updates to ensure eventual consistency.
+ * Used primarily for compensating failed writes from the current node to L2.
+ * It does not make Redis Pub/Sub itself reliable and cannot recover a peer node
+ * that missed an already-published invalidation message.
  * </p>
  *
  * @author dukui
@@ -32,8 +34,9 @@ public interface CacheMessageRepository {
     /**
      * Marks a specific cache message as processed.
      *
-     * @param key     the cache key
-     * @param version the version of the message
+     * @param key        the cache key
+     * @param generation the lifecycle generation of the message
+     * @param version    the version of the message
      */
-    void markProcessed(String key, Long version);
+    void markProcessed(String key, Long generation, Long version);
 }

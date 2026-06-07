@@ -32,6 +32,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
     private final CacheMutationProcessor mutationProcessor;
     private final CacheConfig cacheConfig;
     private final ScheduledExecutorService scheduler;
+    private final CacheRuntimeMetricsRecorder runtimeMetrics;
     private final LifecycleStateMachine lifecycleStateMachine = new LifecycleStateMachine("Compensation replayer");
 
     private volatile ScheduledFuture<?> compensationTask;
@@ -40,10 +41,19 @@ public final class CacheMessageReplayer implements LifecycleManager {
                                 CacheMutationProcessor mutationProcessor,
                                 CacheConfig cacheConfig,
                                 ScheduledExecutorService scheduler) {
+        this(cacheMessageRepository, mutationProcessor, cacheConfig, scheduler, new CacheRuntimeMetricsRecorder());
+    }
+
+    CacheMessageReplayer(CacheMessageRepository cacheMessageRepository,
+                         CacheMutationProcessor mutationProcessor,
+                         CacheConfig cacheConfig,
+                         ScheduledExecutorService scheduler,
+                         CacheRuntimeMetricsRecorder runtimeMetrics) {
         this.cacheMessageRepository = Objects.requireNonNull(cacheMessageRepository, "LocalEventStore cannot be null");
         this.mutationProcessor = Objects.requireNonNull(mutationProcessor, "CacheMutationProcessor cannot be null");
         this.cacheConfig = Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
         this.scheduler = Objects.requireNonNull(scheduler, "ScheduledExecutorService cannot be null");
+        this.runtimeMetrics = Objects.requireNonNull(runtimeMetrics, "CacheRuntimeMetricsRecorder cannot be null");
     }
 
     @Override
@@ -93,25 +103,31 @@ public final class CacheMessageReplayer implements LifecycleManager {
     }
 
     private void compensate() {
+        runtimeMetrics.recordReplayRun();
         try {
             List<CacheMessage<?>> messages = cacheMessageRepository.fetchUnprocessed(cacheConfig.getCompensation().getBatchSize());
             if (messages == null) {
                 LOGGER.error("CacheMessageRepository returned null from fetchUnprocessed; treating it as an empty batch");
                 messages = Collections.emptyList();
             }
+            runtimeMetrics.recordReplayMessagesFetched(messages.size());
             for (CacheMessage<?> message : messages) {
                 if (message == null) {
+                    runtimeMetrics.recordReplayMessageSkipped();
                     LOGGER.error("CacheMessageRepository returned a null message entry from fetchUnprocessed; skipping invalid record");
                     continue;
                 }
                 if (message.getType() == CacheMessageType.PENETRATE
                         || message.getType() == CacheMessageType.BACKFILL) {
+                    runtimeMetrics.recordReplayMessageSkipped();
                     continue;
                 }
                 try {
                     mutationProcessor.apply(message);
-                    cacheMessageRepository.markProcessed(message.getKey(), message.getVersion());
+                    cacheMessageRepository.markProcessed(message.getKey(), message.getGeneration(), message.getVersion());
+                    runtimeMetrics.recordReplayMessageApplied();
                 } catch (Exception e) {
+                    runtimeMetrics.recordReplayMessageFailed();
                     LOGGER.error("Failed to compensate cache message for key {}", message.getKey(), e);
                 }
             }

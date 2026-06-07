@@ -22,6 +22,14 @@ public enum CacheMessageType {
         return wireValue;
     }
 
+    public boolean isDelete() {
+        return this == DELETE;
+    }
+
+    public boolean isPenetration() {
+        return this == PENETRATE;
+    }
+
     public static CacheMessageType fromWireValue(String wireValue) {
         if (wireValue == null) {
             throw new IllegalArgumentException("CacheMessageType cannot be null");

@@ -12,6 +12,7 @@ package io.github.dk900912.multitiercache.api.model;
 public final class CacheMessage<T> {
     private String key;
     private T data;
+    private Long generation;
     private Long version;
     private CacheMessageType type;
     private Long ttlMillis;
@@ -19,8 +20,13 @@ public final class CacheMessage<T> {
     public CacheMessage() {}
 
     public CacheMessage(String key, T data, Long version, CacheMessageType type, Long ttlMillis) {
+        this(key, data, null, version, type, ttlMillis);
+    }
+
+    public CacheMessage(String key, T data, Long generation, Long version, CacheMessageType type, Long ttlMillis) {
         this.key = key;
         this.data = data;
+        this.generation = generation;
         this.version = version;
         this.type = type;
         this.ttlMillis = ttlMillis;
@@ -40,6 +46,14 @@ public final class CacheMessage<T> {
 
     public void setData(T data) {
         this.data = data;
+    }
+
+    public Long getGeneration() {
+        return generation;
+    }
+
+    public void setGeneration(Long generation) {
+        this.generation = generation;
     }
 
     public Long getVersion() {

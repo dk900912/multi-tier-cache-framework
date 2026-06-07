@@ -9,6 +9,7 @@ import io.github.dk900912.multitiercache.api.model.L1CacheStats;
 import io.github.dk900912.multitiercache.spi.L1Provider;
 
 import java.time.Duration;
+import java.util.function.BiFunction;
 
 /**
  * Level 1 (L1) cache provider implementation based on Google Guava Cache.
@@ -64,19 +65,19 @@ public class GuavaL1Provider implements L1Provider {
     @Override
     public Object get(CacheKey key) {
         ensureInitialized();
-        return cache.getIfPresent(key.toRedisKey());
+        return cache.getIfPresent(key.toKeyString());
     }
 
     @Override
     public void put(CacheKey key, Object value) {
         ensureInitialized();
-        cache.put(key.toRedisKey(), value);
+        cache.put(key.toKeyString(), value);
     }
 
     @Override
     public void invalidate(CacheKey key) {
         ensureInitialized();
-        cache.invalidate(key.toRedisKey());
+        cache.invalidate(key.toKeyString());
     }
 
     @Override
@@ -106,6 +107,12 @@ public class GuavaL1Provider implements L1Provider {
         snapshot.setAverageLoadPenalty(stats.averageLoadPenalty());
         snapshot.setEvictionCount(stats.evictionCount());
         return snapshot;
+    }
+
+    @Override
+    public Object compute(CacheKey key, BiFunction<CacheKey, Object, Object> remappingFunction) {
+        ensureInitialized();
+        return cache.asMap().compute(key.toKeyString(), (k, v) -> remappingFunction.apply(key, v));
     }
 
     private void ensureInitialized() {

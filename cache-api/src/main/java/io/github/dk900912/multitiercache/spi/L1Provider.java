@@ -4,6 +4,8 @@ import io.github.dk900912.multitiercache.api.CacheKey;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
 import io.github.dk900912.multitiercache.api.model.L1CacheStats;
 
+import java.util.function.BiFunction;
+
 /**
  * Service Provider Interface (SPI) for Level 1 (L1) local cache.
  * <p>
@@ -57,5 +59,26 @@ public interface L1Provider {
      */
     default L1CacheStats getStats() {
         return null;
+    }
+
+    /**
+     * Atomically computes a value for the specified key using the given remapping function.
+     *
+     * @param key               the cache key
+     * @param remappingFunction the function to compute the new value
+     * @return the new value associated with the key, or {@code null} if the entry was removed
+     */
+    default Object compute(CacheKey key, BiFunction<CacheKey, Object, Object> remappingFunction) {
+        // Default implementation: non-atomic get-compute-put sequence
+        // Implementations should override this with atomic compute operations for correctness
+        Object oldValue = get(key);
+        Object newValue = remappingFunction.apply(key, oldValue);
+        if (newValue != null) {
+            put(key, newValue);
+        } else if (oldValue != null) {
+            invalidate(key);
+        }
+
+        return newValue;
     }
 }

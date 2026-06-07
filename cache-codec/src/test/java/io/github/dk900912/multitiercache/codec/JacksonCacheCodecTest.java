@@ -50,7 +50,7 @@ class JacksonCacheCodecTest {
     void testEncodeAndDecodeGenericList() {
         List<User> users = Arrays.asList(new User(1, "Alice"), new User(2, "Bob"));
         CacheMessage<Object> originalMessage = new CacheMessage<>(
-                "user:list", users, 1L, CacheMessageType.INSERT, 1000L);
+                "user:list", users, 3L, 1L, CacheMessageType.INSERT, 1000L);
 
         String json = codec.encode(originalMessage);
         assertNotNull(json);
@@ -59,6 +59,7 @@ class JacksonCacheCodecTest {
         CacheMessage<Object> decodedMessage = codec.decodeMessage(json, Object.class);
         assertNotNull(decodedMessage);
         assertEquals("user:list", decodedMessage.getKey());
+        assertEquals(3L, decodedMessage.getGeneration());
         assertEquals(1L, decodedMessage.getVersion());
         assertEquals(CacheMessageType.INSERT, decodedMessage.getType());
 
@@ -79,7 +80,7 @@ class JacksonCacheCodecTest {
     @Test
     void testEncodeAndDecodeWithNulls() {
         CacheMessage<Object> originalMessage = new CacheMessage<>(
-                "user:list", null, -1L, CacheMessageType.PENETRATE, null);
+                "user:list", null, 0L, -1L, CacheMessageType.PENETRATE, null);
 
         String json = codec.encode(originalMessage);
         assertNotNull(json);
@@ -87,6 +88,7 @@ class JacksonCacheCodecTest {
         CacheMessage<Object> decodedMessage = codec.decodeMessage(json, Object.class);
         assertNotNull(decodedMessage);
         assertEquals("user:list", decodedMessage.getKey());
+        assertEquals(0L, decodedMessage.getGeneration());
         assertEquals(-1L, decodedMessage.getVersion());
         assertEquals(CacheMessageType.PENETRATE, decodedMessage.getType());
         assertNull(decodedMessage.getData());

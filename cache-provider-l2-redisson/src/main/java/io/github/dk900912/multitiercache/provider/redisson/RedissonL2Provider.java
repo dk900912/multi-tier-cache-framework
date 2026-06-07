@@ -95,13 +95,13 @@ public class RedissonL2Provider implements L2Provider, AutoCloseable {
     @Override
     public String get(CacheKey key) {
         ensureInitialized();
-        return (String) redissonClient.getBucket(key.toRedisKey(), StringCodec.INSTANCE).get();
+        return (String) redissonClient.getBucket(key.toKeyString(), StringCodec.INSTANCE).get();
     }
 
     @Override
     public void set(CacheKey key, String value, Duration ttl) {
         ensureInitialized();
-        RBucket<String> bucket = redissonClient.getBucket(key.toRedisKey(), StringCodec.INSTANCE);
+        RBucket<String> bucket = redissonClient.getBucket(key.toKeyString(), StringCodec.INSTANCE);
         if (ttl != null) {
             bucket.set(value, ttl);
             return;
@@ -112,7 +112,7 @@ public class RedissonL2Provider implements L2Provider, AutoCloseable {
     @Override
     public void delete(CacheKey key) {
         ensureInitialized();
-        redissonClient.getBucket(key.toRedisKey(), StringCodec.INSTANCE).delete();
+        redissonClient.getBucket(key.toKeyString(), StringCodec.INSTANCE).delete();
     }
 
     @Override
