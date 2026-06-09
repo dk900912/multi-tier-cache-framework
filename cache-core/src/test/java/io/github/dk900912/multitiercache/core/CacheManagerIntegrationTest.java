@@ -220,7 +220,7 @@ class CacheManagerIntegrationTest {
     }
 
     @Test
-    void testReinsertOverridesOlderLifecycleDeleteTombstone() throws InterruptedException {
+    void testSameKeyReinsertIsRejectedUntilDeleteTombstoneExpires() throws InterruptedException {
         CacheKey key = CacheKey.simple("integration:test:reinsert:" + UUID.randomUUID());
 
         cacheManager.insert(key, new ComplexEntity(1L, "Alice", List.of("v1")), 1L, Duration.ofMinutes(5));
@@ -229,8 +229,8 @@ class CacheManagerIntegrationTest {
         cacheManager.evict(key, 100L, Duration.ofMinutes(5));
         Thread.sleep(300);
 
-        ComplexEntity reborn = new ComplexEntity(1L, "Alice-Reborn", List.of("v2"));
-        cacheManager.insert(key, reborn, reborn.getVersion(), Duration.ofMinutes(5));
+        ComplexEntity illegalReborn = new ComplexEntity(101L, "Alice-Reborn", List.of("v2"));
+        cacheManager.insert(key, illegalReborn, illegalReborn.getVersion(), Duration.ofMinutes(5));
         Thread.sleep(500);
 
         AtomicInteger loaderCalls = new AtomicInteger();
@@ -239,9 +239,91 @@ class CacheManagerIntegrationTest {
             return CacheLoadResult.of(new ComplexEntity(999L, "Unexpected", List.of()), 999L, Duration.ofMinutes(5));
         });
 
-        assertEquals(0, loaderCalls.get(), "Reinsert should override old delete tombstone without hitting DB");
-        assertNotNull(cached);
-        assertEquals("Alice-Reborn", cached.getName());
+        assertEquals(0, loaderCalls.get(), "Delete tombstone should block same-key reinsert and DB reloads");
+        assertNull(cached);
+
+        CacheKey rebornKey = CacheKey.simple(key.toKeyString() + ":reborn");
+        ComplexEntity legalReborn = new ComplexEntity(1L, "Alice-Reborn", List.of("v2"));
+        cacheManager.insert(rebornKey, legalReborn, legalReborn.getVersion(), Duration.ofMinutes(5));
+        Thread.sleep(300);
+
+        ComplexEntity rebornCached = cacheManager.get(rebornKey, () -> {
+            throw new AssertionError("new key should be served from cache");
+        });
+        assertNotNull(rebornCached);
+        assertEquals("Alice-Reborn", rebornCached.getName());
+    }
+
+    @Test
+    void testEventuallyConvergesAcrossNodesAndL2AfterMutationSequence() throws Exception {
+        CacheManager otherNode = createManager();
+        CacheManager freshNode = createManager();
+        CacheKey key = CacheKey.simple("integration:test:eventual-consistency:" + UUID.randomUUID());
+
+        ComplexEntity inserted = new ComplexEntity(1L, "consistent-v1", List.of("insert"));
+        cacheManager.insert(key, inserted, inserted.getVersion(), Duration.ofMinutes(5));
+        waitUntil(
+                () -> l2MessageMatches(key, CacheMessageType.INSERT, 1L),
+                "insert should become the L2 authoritative state"
+        );
+
+        AtomicInteger otherNodeLoaderCalls = new AtomicInteger();
+        ComplexEntity initialFromOtherNode = otherNode.get(key, () -> {
+            otherNodeLoaderCalls.incrementAndGet();
+            return CacheLoadResult.of(new ComplexEntity(999L, "unexpected-loader", List.of()), 999L, Duration.ofMinutes(5));
+        });
+        assertNotNull(initialFromOtherNode);
+        assertEquals("consistent-v1", initialFromOtherNode.getName());
+        assertEquals(0, otherNodeLoaderCalls.get(), "remote node should read inserted value from cache");
+
+        ComplexEntity updated = new ComplexEntity(2L, "consistent-v2", List.of("update"));
+        cacheManager.update(key, updated, updated.getVersion(), Duration.ofMinutes(5));
+        waitUntil(
+                () -> l2MessageMatches(key, CacheMessageType.UPDATE, 2L),
+                "update should become the L2 authoritative state"
+        );
+        waitUntil(() -> {
+            ComplexEntity latest = otherNode.get(key, () -> {
+                otherNodeLoaderCalls.incrementAndGet();
+                return CacheLoadResult.of(new ComplexEntity(999L, "unexpected-loader", List.of()), 999L, Duration.ofMinutes(5));
+            });
+            return latest != null
+                    && latest.getVersion() == 2L
+                    && "consistent-v2".equals(latest.getName());
+        }, "remote L1 should eventually converge to the updated L2 state");
+        assertEquals(0, otherNodeLoaderCalls.get(), "update convergence should not fall back to DB");
+
+        cacheManager.update(key, new ComplexEntity(1L, "stale-v1", List.of("stale")), 1L, Duration.ofMinutes(5));
+        assertTrue(l2MessageMatches(key, CacheMessageType.UPDATE, 2L), "older mutation must not roll back L2");
+        ComplexEntity afterStaleUpdate = otherNode.get(key, () -> {
+            otherNodeLoaderCalls.incrementAndGet();
+            return CacheLoadResult.of(new ComplexEntity(999L, "unexpected-loader", List.of()), 999L, Duration.ofMinutes(5));
+        });
+        assertNotNull(afterStaleUpdate);
+        assertEquals("consistent-v2", afterStaleUpdate.getName());
+        assertEquals(0, otherNodeLoaderCalls.get(), "stale mutation rejection should not cause DB reload");
+
+        cacheManager.evict(key, 3L, Duration.ofMinutes(5));
+        waitUntil(
+                () -> l2MessageMatches(key, CacheMessageType.DELETE, 3L),
+                "delete should become the L2 authoritative tombstone"
+        );
+        waitUntil(() -> {
+            ComplexEntity deleted = otherNode.get(key, () -> {
+                otherNodeLoaderCalls.incrementAndGet();
+                return CacheLoadResult.of(new ComplexEntity(999L, "unexpected-loader", List.of()), 999L, Duration.ofMinutes(5));
+            });
+            return deleted == null;
+        }, "remote L1 should eventually converge to the delete tombstone");
+        assertEquals(0, otherNodeLoaderCalls.get(), "delete tombstone should block DB reloads on warmed node");
+
+        AtomicInteger freshNodeLoaderCalls = new AtomicInteger();
+        ComplexEntity deletedFromFreshNode = freshNode.get(key, () -> {
+            freshNodeLoaderCalls.incrementAndGet();
+            return CacheLoadResult.of(new ComplexEntity(999L, "unexpected-loader", List.of()), 999L, Duration.ofMinutes(5));
+        });
+        assertNull(deletedFromFreshNode);
+        assertEquals(0, freshNodeLoaderCalls.get(), "delete tombstone should block DB reloads on fresh node");
     }
 
     @Test
@@ -333,7 +415,6 @@ class CacheManagerIntegrationTest {
                 key.toKeyString(),
                 new ComplexEntity(1L, "Wrong-Duplicate", List.of("dup")),
                 1L,
-                1L,
                 io.github.dk900912.multitiercache.api.model.CacheMessageType.UPDATE,
                 Duration.ofMinutes(5).toMillis()
         );
@@ -342,7 +423,6 @@ class CacheManagerIntegrationTest {
         CacheMessage<ComplexEntity> outOfOrderOlder = new CacheMessage<>(
                 key.toKeyString(),
                 new ComplexEntity(0L, "Wrong-Old", List.of("old")),
-                1L,
                 0L,
                 io.github.dk900912.multitiercache.api.model.CacheMessageType.UPDATE,
                 Duration.ofMinutes(5).toMillis()
@@ -377,12 +457,11 @@ class CacheManagerIntegrationTest {
                     CacheMessage<Object> message = readL2Message(key);
                     return message != null
                             && message.getType() == CacheMessageType.INSERT
-                            && message.getGeneration() == 1L
                             && message.getVersion() == 1L;
                 } catch (Exception e) {
                     return false;
                 }
-            }, "insert should materialize in L2 with generation=1");
+            }, "insert should materialize in L2");
 
             AtomicInteger nodeBLoaderCalls = new AtomicInteger();
             ComplexEntity fromNodeB = otherNode.get(key, () -> {
@@ -409,7 +488,6 @@ class CacheManagerIntegrationTest {
             CacheMessage<Object> updatedMessage = readL2Message(key);
             assertNotNull(updatedMessage);
             assertEquals(CacheMessageType.UPDATE, updatedMessage.getType());
-            assertEquals(1L, updatedMessage.getGeneration());
             assertEquals(2L, updatedMessage.getVersion());
 
             cacheManager.evict(key, 100L, Duration.ofMinutes(5));
@@ -418,7 +496,6 @@ class CacheManagerIntegrationTest {
                     CacheMessage<Object> message = readL2Message(key);
                     return message != null
                             && message.getType() == CacheMessageType.DELETE
-                            && message.getGeneration() == 1L
                             && message.getVersion() == 100L;
                 } catch (Exception e) {
                     return false;
@@ -439,34 +516,34 @@ class CacheManagerIntegrationTest {
             }, "remote node should eventually observe delete tombstone");
             assertEquals(0, deleteLoaderCalls.get(), "Delete tombstone should block DB reloads");
 
-            ComplexEntity reborn = new ComplexEntity(1L, "user-" + round + "-reborn", List.of("reinsert"));
-            cacheManager.insert(key, reborn, reborn.getVersion(), Duration.ofMinutes(5));
+            ComplexEntity illegalReborn = new ComplexEntity(101L, "user-" + round + "-illegal-reborn", List.of("reinsert"));
+            cacheManager.insert(key, illegalReborn, illegalReborn.getVersion(), Duration.ofMinutes(5));
 
             waitUntil(() -> {
                 try {
                     CacheMessage<Object> message = readL2Message(key);
                     return message != null
+                            && message.getType() == CacheMessageType.DELETE
+                            && message.getVersion() == 100L;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, "same-key reinsert should be rejected by delete tombstone");
+
+            CacheKey rebornKey = CacheKey.simple(key.toKeyString() + ":reborn");
+            ComplexEntity reborn = new ComplexEntity(1L, "user-" + round + "-reborn", List.of("insert"));
+            cacheManager.insert(rebornKey, reborn, reborn.getVersion(), Duration.ofMinutes(5));
+
+            waitUntil(() -> {
+                try {
+                    CacheMessage<Object> message = readL2Message(rebornKey);
+                    return message != null
                             && message.getType() == CacheMessageType.INSERT
-                            && message.getGeneration() == 2L
                             && message.getVersion() == 1L;
                 } catch (Exception e) {
                     return false;
                 }
-            }, "reinsert should bump generation and override prior delete lifecycle");
-
-            AtomicInteger rebornLoaderCalls = new AtomicInteger();
-            waitUntil(() -> {
-                try {
-                    ComplexEntity rebornFromNodeB = otherNode.get(key, () -> {
-                        rebornLoaderCalls.incrementAndGet();
-                        return CacheLoadResult.of(new ComplexEntity(777L, "unexpected", List.of()), 777L, Duration.ofMinutes(5));
-                    });
-                    return rebornFromNodeB != null && ("user-" + round + "-reborn").equals(rebornFromNodeB.getName());
-                } catch (Exception e) {
-                    return false;
-                }
-            }, "remote node should eventually converge to reborn value after reinsert");
-            assertEquals(0, rebornLoaderCalls.get(), "Reinsert should still be served from cache");
+            }, "revived record must use a new cache key");
         }
     }
 
@@ -491,7 +568,6 @@ class CacheManagerIntegrationTest {
                         CacheMessage<Object> message = readL2Message(insertRaceKey);
                         return message != null
                                 && message.getType() == CacheMessageType.INSERT
-                                && message.getGeneration() == 1L
                                 && message.getVersion() == 1L;
                     } catch (Exception e) {
                         return false;
@@ -519,7 +595,6 @@ class CacheManagerIntegrationTest {
                         CacheMessage<Object> message = readL2Message(deleteRaceKey);
                         return message != null
                                 && message.getType() == CacheMessageType.DELETE
-                                && message.getGeneration() == 1L
                                 && message.getVersion() == 100L + round;
                     } catch (Exception e) {
                         return false;
@@ -573,7 +648,6 @@ class CacheManagerIntegrationTest {
                         CacheMessage<Object> message = readL2Message(key);
                         return message != null
                                 && message.getType() == CacheMessageType.INSERT
-                                && message.getGeneration() == 1L
                                 && message.getVersion() == 5L;
                     } catch (Exception e) {
                         return false;
@@ -606,7 +680,6 @@ class CacheManagerIntegrationTest {
             cacheManager.apply(new CacheMessage<>(
                     key.toKeyString(),
                     new ComplexEntity(2L, "duplicate-v2", List.of()),
-                    1L,
                     2L,
                     CacheMessageType.UPDATE,
                     Duration.ofMinutes(5).toMillis()
@@ -615,7 +688,6 @@ class CacheManagerIntegrationTest {
             cacheManager.apply(new CacheMessage<>(
                     key.toKeyString(),
                     new ComplexEntity(2L, "late-v2", List.of()),
-                    1L,
                     2L,
                     CacheMessageType.UPDATE,
                     Duration.ofMinutes(5).toMillis()
@@ -626,7 +698,6 @@ class CacheManagerIntegrationTest {
                     CacheMessage<Object> message = readL2Message(key);
                     return message != null
                             && message.getType() == CacheMessageType.DELETE
-                            && message.getGeneration() == 1L
                             && message.getVersion() == 3L;
                 } catch (Exception e) {
                     return false;
@@ -688,6 +759,17 @@ class CacheManagerIntegrationTest {
             return codec.decodeMessage(payload, Object.class);
         } finally {
             provider.close();
+        }
+    }
+
+    private boolean l2MessageMatches(CacheKey key, CacheMessageType type, long version) {
+        try {
+            CacheMessage<Object> message = readL2Message(key);
+            return message != null
+                    && message.getType() == type
+                    && message.getVersion() == version;
+        } catch (Exception e) {
+            return false;
         }
     }
 

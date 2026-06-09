@@ -35,8 +35,7 @@ public interface CacheMessageRepository {
      * Marks a specific cache message as processed.
      *
      * @param key        the cache key
-     * @param generation the lifecycle generation of the message
-     * @param version    the version of the message
+     * @param version the version of the message
      */
-    void markProcessed(String key, Long generation, Long version);
+    void markProcessed(String key, Long version);
 }

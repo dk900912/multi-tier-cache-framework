@@ -24,6 +24,16 @@ public class GuavaL1Provider implements L1Provider {
     public GuavaL1Provider() {
     }
 
+    @Override
+    public CacheConfig.L1ProviderType providerType() {
+        return CacheConfig.L1ProviderType.GUAVA;
+    }
+
+    @Override
+    public boolean supportsRecordStats() {
+        return true;
+    }
+
     public GuavaL1Provider(Long maximumSize,
                            Duration expireAfterWrite,
                            Duration expireAfterAccess,

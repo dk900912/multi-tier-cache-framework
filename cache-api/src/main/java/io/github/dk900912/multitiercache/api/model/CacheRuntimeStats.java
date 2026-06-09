@@ -12,7 +12,7 @@ public final class CacheRuntimeStats {
             0L, 0L, 0L,
             0L, 0L,
             0L, 0L,
-            0L, 0L, 0L,
+            0L, 0L, 0L, 0L,
             0L, 0L, 0L,
             0L, 0L,
             0L,
@@ -30,6 +30,7 @@ public final class CacheRuntimeStats {
     private final long l1BackfillSkipped;
     private final long l1InvalidationsApplied;
     private final long l1InvalidationsSkipped;
+    private final long l2ReadFailures;
     private final long l2ReadApplyAccepted;
     private final long l2ReadApplyRejected;
     private final long l2ReadApplyFailures;
@@ -56,6 +57,7 @@ public final class CacheRuntimeStats {
                              long l1BackfillSkipped,
                              long l1InvalidationsApplied,
                              long l1InvalidationsSkipped,
+                             long l2ReadFailures,
                              long l2ReadApplyAccepted,
                              long l2ReadApplyRejected,
                              long l2ReadApplyFailures,
@@ -81,6 +83,7 @@ public final class CacheRuntimeStats {
         this.l1BackfillSkipped = l1BackfillSkipped;
         this.l1InvalidationsApplied = l1InvalidationsApplied;
         this.l1InvalidationsSkipped = l1InvalidationsSkipped;
+        this.l2ReadFailures = l2ReadFailures;
         this.l2ReadApplyAccepted = l2ReadApplyAccepted;
         this.l2ReadApplyRejected = l2ReadApplyRejected;
         this.l2ReadApplyFailures = l2ReadApplyFailures;
@@ -143,6 +146,10 @@ public final class CacheRuntimeStats {
 
     public long getL1InvalidationsSkipped() {
         return l1InvalidationsSkipped;
+    }
+
+    public long getL2ReadFailures() {
+        return l2ReadFailures;
     }
 
     public long getL2ReadApplyAccepted() {

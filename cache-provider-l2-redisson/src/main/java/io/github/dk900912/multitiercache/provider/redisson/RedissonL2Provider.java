@@ -42,6 +42,11 @@ public class RedissonL2Provider implements L2Provider, AutoCloseable {
     }
 
     @Override
+    public CacheConfig.L2ProviderType providerType() {
+        return CacheConfig.L2ProviderType.REDISSON;
+    }
+
+    @Override
     public void initialize(CacheConfig.L2Config config) {
         Objects.requireNonNull(config, "L2 config cannot be null");
         Config redissonConfig = new Config();
@@ -55,13 +60,18 @@ public class RedissonL2Provider implements L2Provider, AutoCloseable {
         clusterConfig.addNodeAddress(config.getHosts().stream()
                 .map(RedissonL2Provider::normalizeAddress)
                 .toArray(String[]::new));
-        if (config.getMaxIdle() != null) {
-            clusterConfig.setMasterConnectionMinimumIdleSize(config.getMaxIdle());
-            clusterConfig.setSlaveConnectionMinimumIdleSize(config.getMaxIdle());
+        CacheConfig.Redisson redisson = Objects.requireNonNull(config.getRedisson(), "Redisson config cannot be null");
+        if (redisson.getMasterConnectionMinimumIdleSize() != null) {
+            clusterConfig.setMasterConnectionMinimumIdleSize(redisson.getMasterConnectionMinimumIdleSize());
         }
-        if (config.getMaxTotal() != null) {
-            clusterConfig.setMasterConnectionPoolSize(config.getMaxTotal());
-            clusterConfig.setSlaveConnectionPoolSize(config.getMaxTotal());
+        if (redisson.getSlaveConnectionMinimumIdleSize() != null) {
+            clusterConfig.setSlaveConnectionMinimumIdleSize(redisson.getSlaveConnectionMinimumIdleSize());
+        }
+        if (redisson.getMasterConnectionPoolSize() != null) {
+            clusterConfig.setMasterConnectionPoolSize(redisson.getMasterConnectionPoolSize());
+        }
+        if (redisson.getSlaveConnectionPoolSize() != null) {
+            clusterConfig.setSlaveConnectionPoolSize(redisson.getSlaveConnectionPoolSize());
         }
         if (config.getConnectionTimeout() != null) {
             clusterConfig.setConnectTimeout(Math.toIntExact(config.getConnectionTimeout().toMillis()));

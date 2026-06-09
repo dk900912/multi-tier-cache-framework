@@ -16,6 +16,20 @@ import java.util.List;
  */
 public class CacheConfig {
 
+    public enum L1ProviderType {
+        AUTO,
+        CAFFEINE,
+        GUAVA,
+        JDK
+    }
+
+    public enum L2ProviderType {
+        AUTO,
+        LETTUCE,
+        REDISSON,
+        JEDIS
+    }
+
     private L1Config l1 = new L1Config();
     private L2Config l2 = new L2Config();
     private CodecConfig codec = new CodecConfig();
@@ -102,6 +116,11 @@ public class CacheConfig {
         private boolean enabled = true;
 
         /**
+         * The L1 provider implementation to use. AUTO keeps the historical classpath-based priority.
+         */
+        private L1ProviderType provider = L1ProviderType.AUTO;
+
+        /**
          * Whether to record L1 cache statistics.
          */
         private boolean recordStats = false;
@@ -135,6 +154,14 @@ public class CacheConfig {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public L1ProviderType getProvider() {
+            return provider;
+        }
+
+        public void setProvider(L1ProviderType provider) {
+            this.provider = provider;
         }
 
         public boolean isRecordStats() {
@@ -188,6 +215,11 @@ public class CacheConfig {
         private boolean enabled = true;
 
         /**
+         * The L2 provider implementation to use. AUTO keeps the historical classpath-based priority.
+         */
+        private L2ProviderType provider = L2ProviderType.AUTO;
+
+        /**
          * The Pub/Sub channel name used for broadcasting cache mutations.
          */
         private String mutationChannelName = "multi-tier-cache-mutation";
@@ -200,22 +232,26 @@ public class CacheConfig {
         /**
          * The maximum number of active connections in the pool.
          */
-        private Integer maxTotal = 10;
+        @Deprecated
+        private Integer maxTotal;
 
         /**
          * The maximum number of idle connections in the pool.
          */
-        private Integer maxIdle = 1;
+        @Deprecated
+        private Integer maxIdle;
 
         /**
          * The minimum number of idle connections in the pool.
          */
-        private Integer minIdle = 1;
+        @Deprecated
+        private Integer minIdle;
 
         /**
          * The maximum time to wait for a connection from the pool.
          */
-        private Duration maxWait = Duration.ofMillis(6000);
+        @Deprecated
+        private Duration maxWait;
 
         /**
          * The connection timeout duration.
@@ -247,12 +283,30 @@ public class CacheConfig {
          */
         private Subscriber subscriber = new Subscriber();
 
+        /**
+         * Jedis-specific connection pool settings.
+         */
+        private Jedis jedis = new Jedis();
+
+        /**
+         * Redisson-specific connection pool settings.
+         */
+        private Redisson redisson = new Redisson();
+
         public boolean isEnabled() {
             return enabled;
         }
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public L2ProviderType getProvider() {
+            return provider;
+        }
+
+        public void setProvider(L2ProviderType provider) {
+            this.provider = provider;
         }
 
         public String getMutationChannelName() {
@@ -350,6 +404,106 @@ public class CacheConfig {
         public void setSubscriber(Subscriber subscriber) {
             this.subscriber = subscriber;
         }
+
+        public Jedis getJedis() {
+            return jedis;
+        }
+
+        public void setJedis(Jedis jedis) {
+            this.jedis = jedis;
+        }
+
+        public Redisson getRedisson() {
+            return redisson;
+        }
+
+        public void setRedisson(Redisson redisson) {
+            this.redisson = redisson;
+        }
+    }
+
+    /**
+     * Jedis-specific L2 provider settings.
+     */
+    public static class Jedis {
+        private Integer maxTotal = 10;
+        private Integer maxIdle = 1;
+        private Integer minIdle = 1;
+        private Duration maxWait = Duration.ofMillis(6000);
+
+        public Integer getMaxTotal() {
+            return maxTotal;
+        }
+
+        public void setMaxTotal(Integer maxTotal) {
+            this.maxTotal = maxTotal;
+        }
+
+        public Integer getMaxIdle() {
+            return maxIdle;
+        }
+
+        public void setMaxIdle(Integer maxIdle) {
+            this.maxIdle = maxIdle;
+        }
+
+        public Integer getMinIdle() {
+            return minIdle;
+        }
+
+        public void setMinIdle(Integer minIdle) {
+            this.minIdle = minIdle;
+        }
+
+        public Duration getMaxWait() {
+            return maxWait;
+        }
+
+        public void setMaxWait(Duration maxWait) {
+            this.maxWait = maxWait;
+        }
+    }
+
+    /**
+     * Redisson-specific L2 provider settings.
+     */
+    public static class Redisson {
+        private Integer masterConnectionPoolSize = 10;
+        private Integer slaveConnectionPoolSize = 10;
+        private Integer masterConnectionMinimumIdleSize = 1;
+        private Integer slaveConnectionMinimumIdleSize = 1;
+
+        public Integer getMasterConnectionPoolSize() {
+            return masterConnectionPoolSize;
+        }
+
+        public void setMasterConnectionPoolSize(Integer masterConnectionPoolSize) {
+            this.masterConnectionPoolSize = masterConnectionPoolSize;
+        }
+
+        public Integer getSlaveConnectionPoolSize() {
+            return slaveConnectionPoolSize;
+        }
+
+        public void setSlaveConnectionPoolSize(Integer slaveConnectionPoolSize) {
+            this.slaveConnectionPoolSize = slaveConnectionPoolSize;
+        }
+
+        public Integer getMasterConnectionMinimumIdleSize() {
+            return masterConnectionMinimumIdleSize;
+        }
+
+        public void setMasterConnectionMinimumIdleSize(Integer masterConnectionMinimumIdleSize) {
+            this.masterConnectionMinimumIdleSize = masterConnectionMinimumIdleSize;
+        }
+
+        public Integer getSlaveConnectionMinimumIdleSize() {
+            return slaveConnectionMinimumIdleSize;
+        }
+
+        public void setSlaveConnectionMinimumIdleSize(Integer slaveConnectionMinimumIdleSize) {
+            this.slaveConnectionMinimumIdleSize = slaveConnectionMinimumIdleSize;
+        }
     }
 
     /**
@@ -432,6 +586,11 @@ public class CacheConfig {
      */
     public static class Compensation {
         /**
+         * Whether to start the local compensation replayer.
+         */
+        private boolean enabled = true;
+
+        /**
          * The initial delay before the compensation replayer starts.
          */
         private Duration initialDelay = Duration.ofSeconds(10);
@@ -445,6 +604,14 @@ public class CacheConfig {
          * The maximum number of unprocessed messages to fetch per batch.
          */
         private int batchSize = 100;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
 
         public Duration getInitialDelay() {
             return initialDelay;

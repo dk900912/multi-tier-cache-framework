@@ -8,11 +8,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 
 /**
- * Internal Redis keyspace mapping for cache data and generation metadata.
+ * Internal Redis keyspace mapping for cache data.
  * <p>
  * Design goals:
  * <ul>
- *     <li>Keep data keys and generation keys in the same Redis Cluster slot</li>
  *     <li>Avoid leaking raw business keys into Redis key names</li>
  *     <li>Use a collision-resistant full SHA-256 identifier instead of a truncated hash</li>
  *     <li>Encode identifiers with Base64URL to keep Redis keys compact and character-safe</li>
@@ -23,7 +22,6 @@ import java.util.Base64;
 public final class CacheKeyspace {
 
     private static final String DATA_PREFIX = "mtc:data:";
-    private static final String GENERATION_PREFIX = "mtc:gen:";
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
         try {
@@ -41,18 +39,9 @@ public final class CacheKeyspace {
         return CacheKey.simple(dataKey(businessKey.toKeyString()));
     }
 
-    public static CacheKey generationKey(CacheKey businessKey) {
-        return CacheKey.simple(generationKey(businessKey.toKeyString()));
-    }
-
     public static String dataKey(String businessKey) {
         String identifier = identifier(businessKey);
         return DATA_PREFIX + "{" + identifier + "}";
-    }
-
-    public static String generationKey(String businessKey) {
-        String identifier = identifier(businessKey);
-        return GENERATION_PREFIX + "{" + identifier + "}";
     }
 
     public static String identifier(String businessKey) {

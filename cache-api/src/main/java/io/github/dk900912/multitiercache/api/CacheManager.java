@@ -50,7 +50,7 @@ public interface CacheManager extends CacheMutationProcessor, LifecycleManager {
     <T> T get(CacheKey key, CacheLoader<T> loader);
 
     /**
-     * Inserts a new value into the cache, propagating the change to L2 and invalidating L1.
+     * Inserts a new value into the cache, propagating the change to L2 and converging local L1.
      *
      * @param key     the cache key
      * @param data    the payload data to cache
@@ -60,7 +60,7 @@ public interface CacheManager extends CacheMutationProcessor, LifecycleManager {
     void insert(CacheKey key, Object data, Long version, Duration ttl);
 
     /**
-     * Updates an existing value in the cache, propagating the change to L2 and invalidating L1.
+     * Updates an existing value in the cache, propagating the change to L2 and converging local L1.
      *
      * @param key     the cache key
      * @param data    the new payload data
@@ -70,7 +70,7 @@ public interface CacheManager extends CacheMutationProcessor, LifecycleManager {
     void update(CacheKey key, Object data, Long version, Duration ttl);
 
     /**
-     * Evicts a value from the cache, propagating the deletion to L2 and invalidating L1.
+     * Evicts a value from the cache, propagating the deletion to L2 and converging local L1.
      *
      * @param key     the cache key
      * @param version the version of the deletion operation

@@ -124,7 +124,7 @@ public final class CacheMessageReplayer implements LifecycleManager {
                 }
                 try {
                     mutationProcessor.apply(message);
-                    cacheMessageRepository.markProcessed(message.getKey(), message.getGeneration(), message.getVersion());
+                    cacheMessageRepository.markProcessed(message.getKey(), message.getVersion());
                     runtimeMetrics.recordReplayMessageApplied();
                 } catch (Exception e) {
                     runtimeMetrics.recordReplayMessageFailed();

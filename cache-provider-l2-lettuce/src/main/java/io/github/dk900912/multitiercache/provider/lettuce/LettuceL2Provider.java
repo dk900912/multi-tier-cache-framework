@@ -46,6 +46,11 @@ public class LettuceL2Provider implements L2Provider, AutoCloseable {
     }
 
     @Override
+    public CacheConfig.L2ProviderType providerType() {
+        return CacheConfig.L2ProviderType.LETTUCE;
+    }
+
+    @Override
     public void initialize(CacheConfig.L2Config config) {
         Objects.requireNonNull(config, "L2 config cannot be null");
         List<RedisURI> redisURIs = parseRedisUris(config);

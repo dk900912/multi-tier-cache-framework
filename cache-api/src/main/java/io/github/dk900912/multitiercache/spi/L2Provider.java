@@ -27,6 +27,14 @@ public interface L2Provider {
     }
 
     /**
+     * Returns the built-in provider type represented by this implementation.
+     * Custom implementations may keep AUTO and rely on classpath selection.
+     */
+    default CacheConfig.L2ProviderType providerType() {
+        return CacheConfig.L2ProviderType.AUTO;
+    }
+
+    /**
      * Retrieves the value associated with the specified key.
      *
      * @param key the cache key

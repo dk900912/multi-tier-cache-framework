@@ -25,6 +25,28 @@ public interface L1Provider {
     }
 
     /**
+     * Returns the built-in provider type represented by this implementation.
+     * Custom implementations may keep AUTO and rely on classpath selection.
+     */
+    default CacheConfig.L1ProviderType providerType() {
+        return CacheConfig.L1ProviderType.AUTO;
+    }
+
+    /**
+     * Whether this provider can expose native L1 cache statistics.
+     */
+    default boolean supportsRecordStats() {
+        return false;
+    }
+
+    /**
+     * Whether this provider can honor fine-grained per-entry expiry.
+     */
+    default boolean supportsFineGrainedExpiry() {
+        return false;
+    }
+
+    /**
      * Retrieves the value associated with the specified key.
      *
      * @param key the cache key

@@ -153,6 +153,37 @@ public class DefaultCacheManager implements CacheManager {
     }
 
     @Override
+    public void apply(CacheMessage<?> message) {
+        Objects.requireNonNull(message, "CacheMessage cannot be null");
+        validateCacheMessage(message);
+
+        if (!isL2Enabled()) {
+            applyAcceptedMutationToLocalL1(message);
+            return;
+        }
+
+        CacheKey key = message::getKey;
+        String payload = cacheCodec.encode(message);
+        try {
+            // L2 must become the authority first; otherwise a concurrent local read can miss L1,
+            // observe stale L2, and rehydrate the current node with old data.
+            boolean applied = applyMessageToL2(key, message, payload, true);
+            if (applied) {
+                applyAcceptedMutationToLocalL1(message);
+            }
+        } catch (Exception e) {
+            try {
+                cacheMessageRepository.save(message);
+                runtimeMetrics.recordCompensationSaveSuccess();
+                LOGGER.warn("L2 propagation failed, message saved for compensation replay", e);
+            } catch (Exception cause) {
+                runtimeMetrics.recordCompensationSaveFailure();
+                LOGGER.error("Failed to save message for compensation - data may be lost", cause);
+            }
+        }
+    }
+
+    @Override
     public void bootstrap() {
         if (!lifecycleStateMachine.beginBootstrap()) {
             return;
@@ -227,38 +258,6 @@ public class DefaultCacheManager implements CacheManager {
         }
     }
 
-    @Override
-    public void apply(CacheMessage<?> message) {
-        Objects.requireNonNull(message, "CacheMessage cannot be null");
-        CacheMessage<?> preparedMessage = prepareMutationMessage(message);
-        validateCacheMessage(preparedMessage);
-
-        if (!isL2Enabled()) {
-            invalidateLocalL1IfStale(preparedMessage);
-            return;
-        }
-
-        CacheKey key = preparedMessage::getKey;
-        String payload = cacheCodec.encode(preparedMessage);
-        try {
-            // L2 must become the authority first; otherwise a concurrent local read can miss L1,
-            // observe stale L2, and rehydrate the current node with old data.
-            boolean applied = applyMessageToL2(key, preparedMessage, payload, true);
-            if (applied) {
-                invalidateLocalL1IfStale(preparedMessage);
-            }
-        } catch (Exception e) {
-            try {
-                cacheMessageRepository.save(preparedMessage);
-                runtimeMetrics.recordCompensationSaveSuccess();
-                LOGGER.warn("L2 propagation failed, message saved for compensation replay", e);
-            } catch (Exception cause) {
-                runtimeMetrics.recordCompensationSaveFailure();
-                LOGGER.error("Failed to save message for compensation - data may be lost", cause);
-            }
-        }
-    }
-
     private Object loadWithSingleFlight(CacheKey key, CacheLoader<?> loader) {
         Duration awaitTimeout = cacheConfig.getSingleFlight().getAwaitTimeout();
         String keyString = key.toKeyString();
@@ -326,7 +325,14 @@ public class DefaultCacheManager implements CacheManager {
         if (!isL2Enabled()) {
             return null;
         }
-        String payload = l2Provider.get(CacheKeyspace.dataKey(key));
+        String payload;
+        try {
+            payload = l2Provider.get(CacheKeyspace.dataKey(key));
+        } catch (Exception e) {
+            runtimeMetrics.recordL2ReadFailure();
+            logL2ReadFailure(key, quiet, "Failed to read L2 cache for key {}", e);
+            return null;
+        }
         if (payload == null) {
             runtimeMetrics.recordL2Miss();
             if (!quiet && LOGGER.isDebugEnabled()) {
@@ -335,7 +341,15 @@ public class DefaultCacheManager implements CacheManager {
             return null;
         }
         runtimeMetrics.recordL2Hit();
-        CacheMessage<Object> message = cacheCodec.decodeMessage(payload, Object.class);
+        CacheMessage<Object> message;
+        try {
+            message = cacheCodec.decodeMessage(payload, Object.class);
+            validateCacheMessage(message);
+        } catch (Exception e) {
+            runtimeMetrics.recordL2ReadFailure();
+            logL2ReadFailure(key, quiet, "Failed to decode L2 cache payload for key {}", e);
+            return null;
+        }
         if (isL1Enabled()) {
             if (!quiet && LOGGER.isDebugEnabled()) {
                 LOGGER.debug("L2 cache hit for key {}", key.toKeyString());
@@ -356,14 +370,12 @@ public class DefaultCacheManager implements CacheManager {
         CacheMessage<Object> message;
         if (loadResult.isPenetration()) {
             Duration penetrationTtl = resolvePenetrationTtl(loadResult.getTtl());
-            message = new CacheMessage<>(key.toKeyString(), null, 0L, loadResult.getVersion(), PENETRATE, toTtlMillis(penetrationTtl));
+            message = new CacheMessage<>(key.toKeyString(), null, loadResult.getVersion(), PENETRATE, toTtlMillis(penetrationTtl));
         } else {
             Duration backfillTtl = resolveBackfillTtl(loadResult.getTtl());
-            Long generation = resolveGeneration(key.toKeyString(), BACKFILL);
             message = new CacheMessage<>(
                     key.toKeyString(),
                     loadResult.getData(),
-                    generation,
                     loadResult.getVersion(),
                     BACKFILL,
                     toTtlMillis(backfillTtl)
@@ -375,15 +387,24 @@ public class DefaultCacheManager implements CacheManager {
 
     private void writeReadResult(CacheKey key, CacheMessage<?> cacheMessage, CacheLoadResult<?> loadResult) {
         boolean appliedToL2 = false;
+        boolean l2ApplyFailed = false;
         if (isL2Enabled()) {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("Writing read result to L2 for key {} with type {}", key.toKeyString(), cacheMessage.getType());
             }
-            appliedToL2 = applyMessageToL2(key, cacheMessage, cacheCodec.encode(cacheMessage), false);
+            try {
+                appliedToL2 = applyMessageToL2(key, cacheMessage, cacheCodec.encode(cacheMessage), false);
+            } catch (Exception e) {
+                l2ApplyFailed = true;
+                LOGGER.warn("Failed to write read result to L2 for key {}; returning loader result without L1 backfill", key.toKeyString(), e);
+            }
         }
 
         if (isL1Enabled()) {
             if (isL2Enabled() && !appliedToL2) {
+                if (l2ApplyFailed) {
+                    return;
+                }
                 // If L2 rejected the read result, another fresher state already won the race.
                 // Re-read L2 so the local node converges to the authoritative winner instead of
                 // writing a stale backfill into L1.
@@ -397,15 +418,22 @@ public class DefaultCacheManager implements CacheManager {
         }
     }
 
+    private void logL2ReadFailure(CacheKey key, boolean quiet, String message, Exception e) {
+        if (quiet) {
+            LOGGER.debug(message, key.toKeyString(), e);
+        } else {
+            LOGGER.warn(message, key.toKeyString(), e);
+        }
+    }
+
     private CacheMessage<Object> createMutationMessage(CacheKey key, Object data, Long version, CacheMessageType type, Duration ttl) {
         Objects.requireNonNull(key, "CacheKey cannot be null");
-        return new CacheMessage<>(key.toKeyString(), data, null, version, type, toTtlMillis(ttl));
+        return new CacheMessage<>(key.toKeyString(), data, version, type, toTtlMillis(ttl));
     }
 
     private void validateCacheMessage(CacheMessage<?> message) {
         Objects.requireNonNull(message, "CacheMessage cannot be null");
         Objects.requireNonNull(message.getKey(), "CacheMessage's key cannot be null");
-        Objects.requireNonNull(message.getGeneration(), "CacheMessage's generation cannot be null");
         Objects.requireNonNull(message.getVersion(), "CacheMessage's version cannot be null");
         Objects.requireNonNull(message.getType(), "CacheMessage's type cannot be null");
         Objects.requireNonNull(message.getTtlMillis(), "CacheMessage's ttl-millis cannot be null");
@@ -415,9 +443,6 @@ public class DefaultCacheManager implements CacheManager {
                 if (message.getData() == null) {
                     throw new IllegalArgumentException("Inserting/Updating mutation must carry a payload data");
                 }
-                if (message.getGeneration() < 1) {
-                    throw new IllegalArgumentException("Inserting/Updating mutation must carry an effective generation");
-                }
                 if (message.getVersion() < 0) {
                     throw new IllegalArgumentException("Inserting/Updating mutation must carry an effective version");
                 }
@@ -425,9 +450,6 @@ public class DefaultCacheManager implements CacheManager {
             case DELETE -> {
                 if (message.getData() != null) {
                     throw new IllegalArgumentException("Deleting mutation must not carry a payload data");
-                }
-                if (message.getGeneration() < 1) {
-                    throw new IllegalArgumentException("Deleting mutation must carry an effective generation");
                 }
                 if (message.getVersion() < 0) {
                     throw new IllegalArgumentException("Deleting mutation must carry an effective version");
@@ -437,9 +459,6 @@ public class DefaultCacheManager implements CacheManager {
                 if (message.getData() != null) {
                     throw new IllegalArgumentException("Penetrating mutation must not carry a payload data");
                 }
-                if (message.getGeneration() != 0L) {
-                    throw new IllegalArgumentException("Penetrating mutation must carry generation 0");
-                }
                 if (message.getVersion() != -1) {
                     throw new IllegalArgumentException("Penetrating mutation must carry an effective version");
                 }
@@ -447,9 +466,6 @@ public class DefaultCacheManager implements CacheManager {
             case BACKFILL -> {
                 if (message.getData() == null) {
                     throw new IllegalArgumentException("Backfilling mutation must carry a payload data");
-                }
-                if (message.getGeneration() < 1) {
-                    throw new IllegalArgumentException("Backfilling mutation must carry an effective generation");
                 }
                 if (message.getVersion() < 0) {
                     throw new IllegalArgumentException("Backfilling mutation must carry an effective version");
@@ -465,7 +481,6 @@ public class DefaultCacheManager implements CacheManager {
                     payload,
                     String.valueOf(message.getTtlMillis()),
                     message.getType().getWireValue(),
-                    String.valueOf(message.getGeneration()),
                     String.valueOf(message.getVersion()),
                     String.valueOf(cacheConfig.getL2().getMutationChannelName()),
                     publish ? "1" : "0"
@@ -474,20 +489,18 @@ public class DefaultCacheManager implements CacheManager {
             if (SUCCESS.equals(rst)) {
                 recordL2ApplyAccepted(publish);
                 LOGGER.debug(
-                        "Applied L2 cache message for key {} with type {} and generation/version {}/{}",
+                        "Applied L2 cache message for key {} with type {} and version {}",
                         key.toKeyString(),
                         message.getType(),
-                        message.getGeneration(),
                         message.getVersion()
                 );
                 return true;
             } else {
                 recordL2ApplyRejected(publish);
                 LOGGER.debug(
-                        "Skipped L2 cache message for key {} with type {} and generation/version {}/{}",
+                        "Skipped L2 cache message for key {} with type {} and version {}",
                         key.toKeyString(),
                         message.getType(),
-                        message.getGeneration(),
                         message.getVersion()
                 );
                 return false;
@@ -563,61 +576,43 @@ public class DefaultCacheManager implements CacheManager {
         return ttl.toMillis();
     }
 
-    private CacheMessage<?> prepareMutationMessage(CacheMessage<?> message) {
-        if (message.getGeneration() != null) {
-            return message;
-        }
-        // Insert/reinsert may advance the lifecycle generation even when the business version restarts
-        // from a smaller value, so generation resolution must happen centrally before validation/apply.
-        Long generation = resolveGeneration(message.getKey(), message.getType());
-        return new CacheMessage<>(
-                message.getKey(),
-                message.getData(),
-                generation,
-                message.getVersion(),
-                message.getType(),
-                message.getTtlMillis()
-        );
-    }
-
     private void handleIncomingMutation(CacheMessage<?> message) {
         runtimeMetrics.recordPubSubMessageReceived();
-        invalidateLocalL1IfStale(message);
+        validateCacheMessage(message);
+        applyRemoteMutationToLocalL1(message);
     }
 
-    private void invalidateLocalL1IfStale(CacheMessage<?> incomingMessage) {
+    private void applyAcceptedMutationToLocalL1(CacheMessage<?> incomingMessage) {
+        convergeLocalL1(incomingMessage, true);
+    }
+
+    private void applyRemoteMutationToLocalL1(CacheMessage<?> incomingMessage) {
+        convergeLocalL1(incomingMessage, false);
+    }
+
+    private void convergeLocalL1(CacheMessage<?> incomingMessage, boolean writeWhenAbsent) {
         if (!isL1Enabled()) {
             return;
         }
         CacheKey businessKey = incomingMessage::getKey;
-        // This path is shared by two callers:
-        // 1) the local write path after L2 has already accepted the mutation;
-        // 2) the Pub/Sub subscriber that reacts to remote mutations.
-        //
-        // In both cases we never delete L1 blindly. The local node may already hold a newer value
-        // because of a racing backfill/reinsert, and subscriber messages may arrive duplicated or
-        // out of order. Therefore, invalidation must be guarded by the same ordering rule used by L2.
         l1Provider.compute(businessKey, (key, cachedValue) -> {
             if (cachedValue == null) {
+                if (writeWhenAbsent) {
+                    runtimeMetrics.recordL1InvalidationApplied();
+                    return incomingMessage;
+                }
                 runtimeMetrics.recordL1InvalidationSkipped();
                 return null;
             }
             if (!(cachedValue instanceof CacheMessage<?> localMessage)) {
-                runtimeMetrics.recordL1InvalidationSkipped();
-                return null;
+                runtimeMetrics.recordL1InvalidationApplied();
+                return writeWhenAbsent ? incomingMessage : null;
             }
-            // compute(...) gives us a per-key atomic read-modify-write on L1. Without it, one thread
-            // could read an older local value while another thread is backfilling a newer one, and a
-            // stale invalidation decision would clobber the winner after the comparison is made.
-            //
-            // shouldInvalidate(...) mirrors the L2 generation/version ordering:
-            // - higher generation always wins
-            // - within the same generation, DELETE uses <= and UPSERT uses <
-            // So "skip" here is an expected steady-state outcome for duplicate, delayed, or older
-            // messages, not a failure.
             if (CacheMessageVersionComparator.shouldInvalidate(localMessage, incomingMessage)) {
                 runtimeMetrics.recordL1InvalidationApplied();
-                return null;
+                // Local accepted mutations should materialize the winning state in L1, including delete tombstones.
+                // Remote Pub/Sub is only an invalidation accelerator; leave L1 empty so the next read converges from L2.
+                return writeWhenAbsent ? incomingMessage : null;
             }
             runtimeMetrics.recordL1InvalidationSkipped();
             return localMessage;
@@ -633,7 +628,7 @@ public class DefaultCacheManager implements CacheManager {
                 runtimeMetrics.recordL1BackfillApplied();
                 return incomingMessage;
             }
-            // L1 writes are also ordered by generation/version so an older L2 hit, backfill, or
+            // L1 writes are also ordered by version/type so an older L2 hit, backfill, or
             // penetration hint cannot overwrite a newer local state.
             if (CacheMessageVersionComparator.shouldReplace(incomingMessage, localMessage)) {
                 runtimeMetrics.recordL1BackfillApplied();
@@ -644,23 +639,4 @@ public class DefaultCacheManager implements CacheManager {
         });
     }
 
-    private Long resolveGeneration(String businessKey, CacheMessageType type) {
-        if (type == PENETRATE) {
-            return 0L;
-        }
-        if (!isL2Enabled()) {
-            return 1L;
-        }
-        // Generation is resolved in L2 so all nodes observe the same lifecycle fence:
-        // delete keeps the current generation, while insert/reinsert can atomically advance it.
-        List<String> keys = List.of(
-                CacheKeyspace.dataKey(businessKey),
-                CacheKeyspace.generationKey(businessKey)
-        );
-        Object result = l2Provider.eval(CacheLuaScripts.RESOLVE_GENERATION_LUA_SCRIPT, keys, List.of(type.getWireValue()));
-        if (result instanceof Number number) {
-            return number.longValue();
-        }
-        return Long.parseLong(String.valueOf(result));
-    }
 }
