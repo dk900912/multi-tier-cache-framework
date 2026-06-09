@@ -22,6 +22,7 @@ final class CacheRuntimeMetricsRecorder {
     private final LongAdder l1BackfillSkipped = new LongAdder();
     private final LongAdder l1InvalidationsApplied = new LongAdder();
     private final LongAdder l1InvalidationsSkipped = new LongAdder();
+    private final LongAdder l2ReadFailures = new LongAdder();
     private final LongAdder l2ReadApplyAccepted = new LongAdder();
     private final LongAdder l2ReadApplyRejected = new LongAdder();
     private final LongAdder l2ReadApplyFailures = new LongAdder();
@@ -76,6 +77,10 @@ final class CacheRuntimeMetricsRecorder {
 
     void recordL1InvalidationSkipped() {
         l1InvalidationsSkipped.increment();
+    }
+
+    void recordL2ReadFailure() {
+        l2ReadFailures.increment();
     }
 
     void recordL2ReadApplyAccepted() {
@@ -147,6 +152,7 @@ final class CacheRuntimeMetricsRecorder {
                 l1BackfillSkipped.sum(),
                 l1InvalidationsApplied.sum(),
                 l1InvalidationsSkipped.sum(),
+                l2ReadFailures.sum(),
                 l2ReadApplyAccepted.sum(),
                 l2ReadApplyRejected.sum(),
                 l2ReadApplyFailures.sum(),

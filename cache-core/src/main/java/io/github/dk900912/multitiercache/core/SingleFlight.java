@@ -1,70 +1,99 @@
 package io.github.dk900912.multitiercache.core;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Implementation of the SingleFlight pattern.
+ * Industrial-grade SingleFlight implementation.
  * <p>
- * Ensures that only one concurrent request is executed for a given key, while other
- * concurrent requests wait for the result. This effectively prevents cache breakdown
- * under high concurrency.
+ * Eliminates asymmetric timeout risks and prevents permanent line freezing.
+ * Fully compatible with Java 21+ virtual threads.
  * </p>
  *
  * @author dukui
  */
 public final class SingleFlight {
 
-    private final ConcurrentHashMap<String, Flight> flights = new ConcurrentHashMap<>();
+    private static final ThreadLocal<Set<String>> LOADING_KEYS = ThreadLocal.withInitial(HashSet::new);
 
-    <T> T execute(String key, Duration timeout, FlightLoader<T> loader) {
+    private final ConcurrentHashMap<String, Flight> flights = new ConcurrentHashMap<>();
+    private final Executor executor;
+
+    public SingleFlight() {
+        this.executor = ForkJoinPool.commonPool();
+    }
+
+    public SingleFlight(Executor executor) {
+        this.executor = Objects.requireNonNull(executor, "Executor cannot be null");
+    }
+
+    public <T> T execute(String key, Duration timeout, FlightLoader<T> loader) {
         Objects.requireNonNull(key, "SingleFlight key cannot be null");
         Objects.requireNonNull(timeout, "SingleFlight timeout cannot be null");
         Objects.requireNonNull(loader, "SingleFlight loader cannot be null");
 
-        Flight newFlight = new Flight(new CompletableFuture<>(), Thread.currentThread().threadId());
-        Flight existingFlight = flights.putIfAbsent(key, newFlight);
-        if (existingFlight != null) {
-            return await(key, existingFlight, timeout);
+        if (LOADING_KEYS.get().contains(key)) {
+            throw recursiveLoadFailure(key);
+        }
+
+        // 1. Atomically compute or retrieve the flight to collapse concurrent requests
+        Flight flight = flights.computeIfAbsent(key, k -> {
+            CompletableFuture<Object> future = new CompletableFuture<>();
+            Flight newFlight = new Flight(future);
+
+            // Asynchronously execute the loader so that the owner thread is bound by the timeout contract
+            executor.execute(() -> runLoader(k, loader, newFlight));
+            return newFlight;
+        });
+
+        // 2. Symmetrically await and retrieve the result for both owner and waiters
+        try {
+            @SuppressWarnings("unchecked")
+            T result = (T) flight.result().get(toWaitNanos(timeout), TimeUnit.NANOSECONDS);
+            return result;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for key: " + key, e);
+        } catch (TimeoutException e) {
+            flights.remove(key, flight);
+            throw new IllegalStateException("Execution timed out after " + timeout.toMillis() + "ms for key: " + key, e);
+        } catch (ExecutionException e) {
+            throw propagateFailure(key, e.getCause());
+        }
+    }
+
+    private <T> void runLoader(String key, FlightLoader<T> loader, Flight flight) {
+        Set<String> loadingKeys = LOADING_KEYS.get();
+        if (!loadingKeys.add(key)) {
+            flight.result().completeExceptionally(recursiveLoadFailure(key));
+            return;
         }
 
         try {
             T value = loader.load();
-            newFlight.result().complete(value);
-            return value;
-        } catch (RuntimeException | Error e) {
-            newFlight.result().completeExceptionally(e);
-            throw e;
-        } catch (Exception e) {
-            IllegalStateException wrapped = new IllegalStateException("SingleFlight loader failed for key " + key, e);
-            newFlight.result().completeExceptionally(wrapped);
-            throw wrapped;
+            flight.result().complete(value);
+        } catch (Throwable e) {
+            flight.result().completeExceptionally(e);
         } finally {
-            flights.remove(key, newFlight);
+            loadingKeys.remove(key);
+            if (loadingKeys.isEmpty()) {
+                LOADING_KEYS.remove();
+            }
+            flights.remove(key, flight);
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private <T> T await(String key, Flight flight, Duration timeout) {
-        if (flight.ownerThreadId() == Thread.currentThread().threadId()) {
-            throw new IllegalStateException("Recursive cache load for key " + key + " would deadlock");
-        }
-
-        try {
-            return (T) flight.result().get(toWaitNanos(timeout), TimeUnit.NANOSECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted waiting for concurrent cache load for key " + key, e);
-        } catch (TimeoutException e) {
-            throw new IllegalStateException("Timed out waiting for concurrent cache load for key " + key, e);
-        } catch (ExecutionException e) {
-            throw propagateFailure(key, e.getCause());
-        }
+    private IllegalStateException recursiveLoadFailure(String key) {
+        return new IllegalStateException("Recursive cache load detected for key '" + key + "' which would cause a deadlock.");
     }
 
     private RuntimeException propagateFailure(String key, Throwable cause) {
@@ -74,7 +103,7 @@ public final class SingleFlight {
         if (cause instanceof Error error) {
             throw error;
         }
-        return new IllegalStateException("Concurrent cache load failed for key " + key, cause);
+        return new IllegalStateException("Load failed for key: " + key, cause);
     }
 
     private long toWaitNanos(Duration timeout) {
@@ -86,9 +115,9 @@ public final class SingleFlight {
     }
 
     @FunctionalInterface
-    interface FlightLoader<T> {
+    public interface FlightLoader<T> {
         T load() throws Exception;
     }
 
-    private record Flight(CompletableFuture<Object> result, long ownerThreadId) { }
+    private record Flight(CompletableFuture<Object> result) { }
 }

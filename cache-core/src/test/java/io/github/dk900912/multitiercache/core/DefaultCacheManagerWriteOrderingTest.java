@@ -7,6 +7,7 @@ import io.github.dk900912.multitiercache.api.model.CacheConfig;
 import io.github.dk900912.multitiercache.api.model.CacheLoadResult;
 import io.github.dk900912.multitiercache.api.model.CacheMessage;
 import io.github.dk900912.multitiercache.api.model.CacheMessageType;
+import io.github.dk900912.multitiercache.api.model.CacheRuntimeStats;
 import io.github.dk900912.multitiercache.codec.JacksonCacheCodec;
 import io.github.dk900912.multitiercache.spi.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
@@ -22,10 +23,170 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultCacheManagerWriteOrderingTest {
+
+    @Test
+    void shouldFallbackToLoaderWhenL2ReadFails() {
+        CacheConfig config = new CacheConfig();
+        config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
+
+        RecordingL1Provider l1Provider = new RecordingL1Provider();
+        DegradingL2Provider l2Provider = new DegradingL2Provider(true, false);
+        CacheCodec codec = new JacksonCacheCodec();
+        codec.initialize(config);
+        DefaultCacheManager cacheManager = new DefaultCacheManager(
+                config,
+                l1Provider,
+                l2Provider,
+                new NoopRepository(),
+                codec,
+                new SingleFlight()
+        );
+
+        CacheKey key = CacheKey.simple("ordering:test:l2-read-failure");
+        AtomicInteger loaderCalls = new AtomicInteger();
+        String value = cacheManager.get(key, () -> {
+            loaderCalls.incrementAndGet();
+            return CacheLoadResult.of("db-value", 1L, Duration.ofMinutes(5));
+        });
+
+        assertEquals("db-value", value);
+        assertEquals(1, loaderCalls.get());
+        assertInstanceOf(CacheMessage.class, l1Provider.get(key), "L1 may backfill after L2 accepts the loader result");
+
+        CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
+        assertEquals(2L, stats.getL2ReadFailures(), "initial L2 read and single-flight owner recheck should both degrade");
+        assertEquals(1L, stats.getL2ReadApplyAccepted());
+    }
+
+    @Test
+    void shouldReturnLoaderResultWhenReadBackfillToL2Fails() {
+        CacheConfig config = new CacheConfig();
+        config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
+
+        RecordingL1Provider l1Provider = new RecordingL1Provider();
+        DegradingL2Provider l2Provider = new DegradingL2Provider(false, true);
+        CacheCodec codec = new JacksonCacheCodec();
+        codec.initialize(config);
+        DefaultCacheManager cacheManager = new DefaultCacheManager(
+                config,
+                l1Provider,
+                l2Provider,
+                new NoopRepository(),
+                codec,
+                new SingleFlight()
+        );
+
+        CacheKey key = CacheKey.simple("ordering:test:l2-read-apply-failure");
+        AtomicInteger loaderCalls = new AtomicInteger();
+        String value = cacheManager.get(key, () -> {
+            loaderCalls.incrementAndGet();
+            return CacheLoadResult.of("db-value", 1L, Duration.ofMinutes(5));
+        });
+
+        assertEquals("db-value", value);
+        assertEquals(1, loaderCalls.get());
+        assertNull(l1Provider.get(key), "L1 should not backfill when L2 enabled but L2 did not accept the read result");
+
+        CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
+        assertEquals(1L, stats.getL2ReadApplyFailures());
+        assertEquals(0L, stats.getL1BackfillApplied());
+    }
+
+    @Test
+    void shouldKeepDeleteTombstoneInL1WhenL2Disabled() {
+        CacheConfig config = new CacheConfig();
+        config.getL2().setEnabled(false);
+        config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
+
+        RecordingL1Provider l1Provider = new RecordingL1Provider();
+        CacheCodec codec = new JacksonCacheCodec();
+        codec.initialize(config);
+        DefaultCacheManager cacheManager = new DefaultCacheManager(
+                config,
+                l1Provider,
+                new DisabledL2Provider(),
+                new NoopRepository(),
+                codec,
+                new SingleFlight()
+        );
+
+        CacheKey key = CacheKey.simple("ordering:test:l2-disabled-delete");
+        l1Provider.put(key, new CacheMessage<>(
+                key.toKeyString(),
+                "value-v1",
+                1L,
+                CacheMessageType.INSERT,
+                Duration.ofMinutes(5).toMillis()
+        ));
+
+        cacheManager.evict(key, 2L, Duration.ofMinutes(5));
+
+        CacheMessage<?> tombstone = (CacheMessage<?>) assertInstanceOf(CacheMessage.class, l1Provider.get(key));
+        assertEquals(CacheMessageType.DELETE, tombstone.getType());
+        assertEquals(2L, tombstone.getVersion());
+
+        AtomicInteger loaderCalls = new AtomicInteger();
+        String cached = cacheManager.get(key, () -> {
+            loaderCalls.incrementAndGet();
+            return CacheLoadResult.of("stale-v1", 1L, Duration.ofMinutes(5));
+        });
+
+        assertNull(cached);
+        assertEquals(0, loaderCalls.get(), "L1 tombstone should block stale backfill when L2 is disabled");
+        CacheMessage<?> afterRead = (CacheMessage<?>) assertInstanceOf(CacheMessage.class, l1Provider.get(key));
+        assertEquals(CacheMessageType.DELETE, afterRead.getType());
+        assertEquals(2L, afterRead.getVersion());
+    }
+
+    @Test
+    void shouldInvalidateExistingL1FromPubSubWithoutWarmingAbsentKeys() {
+        CacheConfig config = new CacheConfig();
+        config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
+
+        RecordingL1Provider l1Provider = new RecordingL1Provider();
+        BlockingL2Provider l2Provider = new BlockingL2Provider(config);
+        CacheCodec codec = new JacksonCacheCodec();
+        codec.initialize(config);
+        DefaultCacheManager cacheManager = new DefaultCacheManager(
+                config,
+                l1Provider,
+                l2Provider,
+                new NoopRepository(),
+                codec,
+                new SingleFlight()
+        );
+        cacheManager.bootstrap();
+
+        CacheKey key = CacheKey.simple("ordering:test:pubsub-converge");
+        CacheMessage<String> remoteUpdate = new CacheMessage<>(
+                key.toKeyString(),
+                "value-v2",
+                2L,
+                CacheMessageType.UPDATE,
+                Duration.ofMinutes(5).toMillis()
+        );
+
+        l2Provider.publish(config.getL2().getMutationChannelName(), codec.encode(remoteUpdate));
+        assertNull(l1Provider.get(key), "remote Pub/Sub should not prewarm an absent L1 entry");
+
+        l1Provider.put(key, new CacheMessage<>(
+                key.toKeyString(),
+                "value-v1",
+                1L,
+                CacheMessageType.INSERT,
+                Duration.ofMinutes(5).toMillis()
+        ));
+
+        l2Provider.publish(config.getL2().getMutationChannelName(), codec.encode(remoteUpdate));
+
+        assertNull(l1Provider.get(key), "remote Pub/Sub should invalidate stale L1 instead of storing the payload");
+    }
 
     @Test
     void shouldKeepLocalL1VisibleUntilL2ApplyCompletes() throws Exception {
@@ -51,7 +212,6 @@ class DefaultCacheManagerWriteOrderingTest {
         CacheMessage<String> oldMessage = new CacheMessage<>(
                 key.toKeyString(),
                 "value-v1",
-                1L,
                 1L,
                 CacheMessageType.INSERT,
                 Duration.ofMinutes(5).toMillis()
@@ -91,7 +251,7 @@ class DefaultCacheManagerWriteOrderingTest {
         }
 
         @Override
-        public void markProcessed(String key, Long generation, Long version) {
+        public void markProcessed(String key, Long version) {
         }
     }
 
@@ -134,7 +294,6 @@ class DefaultCacheManagerWriteOrderingTest {
     private static final class BlockingL2Provider implements L2Provider {
         private final CacheCodec codec;
         private final Map<String, String> values = new HashMap<>();
-        private final Map<String, Long> generations = new HashMap<>();
         private io.github.dk900912.multitiercache.api.CacheMessageListener listener;
         private final CountDownLatch applyEntered = new CountDownLatch(1);
         private final CountDownLatch allowApply = new CountDownLatch(1);
@@ -146,7 +305,6 @@ class DefaultCacheManagerWriteOrderingTest {
 
         void seed(CacheKey key, CacheMessage<?> message) {
             values.put(CacheKeyspace.dataKey(key).toKeyString(), codec.encode(message));
-            generations.put(key.toKeyString(), message.getGeneration());
         }
 
         @Override
@@ -179,14 +337,6 @@ class DefaultCacheManagerWriteOrderingTest {
 
         @Override
         public Object eval(String script, List<String> keys, List<String> args) {
-            if (CacheLuaScripts.RESOLVE_GENERATION_LUA_SCRIPT.equals(script)) {
-                String generationKey = keys.get(1);
-                long current = generations.getOrDefault(generationKey, 0L);
-                String type = args.getFirst();
-                long generation = CacheMessageType.INSERT.getWireValue().equals(type) ? current + 1L : Math.max(current, 1L);
-                generations.put(generationKey, generation);
-                return generation;
-            }
             if (CacheLuaScripts.APPLY_MESSAGE_LUA_SCRIPT.equals(script)) {
                 applyEntered.countDown();
                 try {
@@ -197,12 +347,95 @@ class DefaultCacheManagerWriteOrderingTest {
                 }
                 String payload = args.getFirst();
                 values.put(keys.getFirst(), payload);
-                if ("1".equals(args.get(6))) {
-                    publish(args.get(5), payload);
+                if ("1".equals(args.get(5))) {
+                    publish(args.get(4), payload);
                 }
                 return 1L;
             }
             throw new IllegalArgumentException("Unexpected script");
+        }
+    }
+
+    private static final class DisabledL2Provider implements L2Provider {
+        @Override
+        public String get(CacheKey key) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
+        public void set(CacheKey key, String value, Duration ttl) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
+        public void delete(CacheKey key) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
+        public void publish(String channel, String message) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
+        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
+        public Object eval(String script, List<String> keys, List<String> args) {
+            throw new AssertionError("L2 should be disabled");
+        }
+    }
+
+    private static final class DegradingL2Provider implements L2Provider {
+        private final boolean failGet;
+        private final boolean failEval;
+        private final Map<String, String> values = new HashMap<>();
+
+        private DegradingL2Provider(boolean failGet, boolean failEval) {
+            this.failGet = failGet;
+            this.failEval = failEval;
+        }
+
+        @Override
+        public String get(CacheKey key) {
+            if (failGet) {
+                throw new IllegalStateException("simulated L2 read failure");
+            }
+            return values.get(key.toKeyString());
+        }
+
+        @Override
+        public void set(CacheKey key, String value, Duration ttl) {
+            values.put(key.toKeyString(), value);
+        }
+
+        @Override
+        public void delete(CacheKey key) {
+            values.remove(key.toKeyString());
+        }
+
+        @Override
+        public void publish(String channel, String message) {
+        }
+
+        @Override
+        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener) {
+            return () -> {
+            };
+        }
+
+        @Override
+        public Object eval(String script, List<String> keys, List<String> args) {
+            if (!CacheLuaScripts.APPLY_MESSAGE_LUA_SCRIPT.equals(script)) {
+                throw new IllegalArgumentException("Unexpected script");
+            }
+            if (failEval) {
+                throw new IllegalStateException("simulated L2 read apply failure");
+            }
+            values.put(keys.getFirst(), args.getFirst());
+            return 1L;
         }
     }
 }

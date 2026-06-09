@@ -41,7 +41,7 @@ class CacheMessageReplayerTest {
     @Test
     void shouldSkipNullEntriesAndProcessValidMessages() throws Exception {
         RecordingRepository repository = new RecordingRepository();
-        CacheMessage<String> update = new CacheMessage<>("user:1", "value", 2L, 1L, CacheMessageType.UPDATE, 1000L);
+        CacheMessage<String> update = new CacheMessage<>("user:1", "value", 1L, CacheMessageType.UPDATE, 1000L);
         repository.messages = Arrays.asList(null, update);
         RecordingMutationProcessor processor = new RecordingMutationProcessor();
         CacheMessageReplayer replayer = createReplayer(repository, processor);
@@ -49,7 +49,7 @@ class CacheMessageReplayerTest {
         invokeCompensate(replayer);
 
         assertEquals(List.of(update), processor.appliedMessages);
-        assertEquals(List.of("user:1:2:1"), repository.processedKeys);
+        assertEquals(List.of("user:1:1"), repository.processedKeys);
     }
 
     @Test
@@ -79,16 +79,15 @@ class CacheMessageReplayerTest {
 
         assertEquals(1, repository.messages.size(), "Failed mutation should be saved for compensation");
         CacheMessage<?> savedMessage = repository.messages.getFirst();
-        assertNotNull(savedMessage.getGeneration(), "Saved message should already carry the resolved generation");
+        assertEquals(1L, savedMessage.getVersion());
 
         CacheMessageReplayer replayer = createReplayer(repository, cacheManager, runtimeMetrics);
         invokeCompensate(replayer);
 
         assertNotNull(l2Provider.latestPayload, "Replay should eventually write payload to L2");
         CacheMessage<?> replayedMessage = codec.decodeMessage(l2Provider.latestPayload, Object.class);
-        assertEquals(1L, replayedMessage.getGeneration());
         assertEquals(1L, replayedMessage.getVersion());
-        assertEquals(List.of("user:compensate:1:1"), repository.processedKeys);
+        assertEquals(List.of("user:compensate:1"), repository.processedKeys);
 
         CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
         assertEquals(1L, stats.getCompensationSaveSuccesses());
@@ -134,8 +133,8 @@ class CacheMessageReplayerTest {
         }
 
         @Override
-        public void markProcessed(String key, Long generation, Long version) {
-            processedKeys.add(key + ":" + generation + ":" + version);
+        public void markProcessed(String key, Long version) {
+            processedKeys.add(key + ":" + version);
         }
     }
 
@@ -154,8 +153,8 @@ class CacheMessageReplayerTest {
         }
 
         @Override
-        public void markProcessed(String key, Long generation, Long version) {
-            processedKeys.add(key + ":" + generation + ":" + version);
+        public void markProcessed(String key, Long version) {
+            processedKeys.add(key + ":" + version);
         }
     }
 
@@ -207,9 +206,6 @@ class CacheMessageReplayerTest {
 
         @Override
         public Object eval(String script, List<String> keys, List<String> args) {
-            if (CacheLuaScripts.RESOLVE_GENERATION_LUA_SCRIPT.equals(script)) {
-                return 1L;
-            }
             if (CacheLuaScripts.APPLY_MESSAGE_LUA_SCRIPT.equals(script)) {
                 if (firstApply) {
                     firstApply = false;

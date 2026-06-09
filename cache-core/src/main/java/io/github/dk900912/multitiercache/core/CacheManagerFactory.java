@@ -48,6 +48,10 @@ public class CacheManagerFactory {
         DefaultCacheManager cacheManager = new DefaultCacheManager(
                 cacheConfig, l1Provider, l2Provider, cacheMessageRepository, cacheCodec, singleFlight, runtimeMetrics);
 
+        if (!shouldStartCompensationReplayer(cacheConfig, cacheMessageRepository)) {
+            return new LifecycleAwareCacheManager(cacheManager);
+        }
+
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "cache-message-replayer");
             thread.setDaemon(true);
@@ -72,11 +76,7 @@ public class CacheManagerFactory {
             throw new IllegalStateException("No L1Provider was loaded through SPI and L1 cache is enabled");
         }
 
-        L1Provider provider = providers.stream()
-                .min(Comparator
-                        .comparingInt(CacheManagerFactory::l1Priority)
-                        .thenComparing(p -> p.getClass().getName()))
-                .orElseThrow();
+        L1Provider provider = selectL1Provider(providers, l1Config.getProvider());
         CacheConfigValidator.validateResolvedL1Provider(cacheConfig, provider);
         initializeL1Provider(provider, l1Config);
         LOGGER.info("Selected L1Provider: {}", provider.getClass().getName());
@@ -95,11 +95,7 @@ public class CacheManagerFactory {
             throw new IllegalStateException("No L2Provider was loaded through SPI and L2 cache is enabled");
         }
 
-        L2Provider provider = providers.stream()
-                .min(Comparator
-                        .comparingInt(CacheManagerFactory::l2Priority)
-                        .thenComparing(p -> p.getClass().getName()))
-                .orElseThrow();
+        L2Provider provider = selectL2Provider(providers, l2Config.getProvider());
         CacheConfigValidator.validateResolvedL2Provider(cacheConfig, provider);
         initializeL2Provider(provider, l2Config);
         LOGGER.info("Selected L2Provider: {}", provider.getClass().getName());
@@ -140,6 +136,22 @@ public class CacheManagerFactory {
         return codec;
     }
 
+    private static boolean shouldStartCompensationReplayer(CacheConfig cacheConfig, CacheMessageRepository repository) {
+        if (!cacheConfig.getCompensation().isEnabled()) {
+            LOGGER.info("Compensation replayer is disabled by configuration.");
+            return false;
+        }
+        if (cacheConfig.getL2() == null || !cacheConfig.getL2().isEnabled()) {
+            LOGGER.info("Compensation replayer is disabled because L2 cache is disabled.");
+            return false;
+        }
+        if (repository instanceof DefaultCacheMessageRepository) {
+            LOGGER.info("Compensation replayer is disabled because no persistent CacheMessageRepository is configured.");
+            return false;
+        }
+        return true;
+    }
+
     private static void initializeL1Provider(L1Provider provider, CacheConfig.L1Config config) {
         try {
             provider.initialize(config);
@@ -162,32 +174,62 @@ public class CacheManagerFactory {
         return providers;
     }
 
+    private static L1Provider selectL1Provider(List<L1Provider> providers, CacheConfig.L1ProviderType configuredProvider) {
+        if (configuredProvider != CacheConfig.L1ProviderType.AUTO) {
+            return providers.stream()
+                    .filter(provider -> provider.providerType() == configuredProvider)
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Configured L1 provider " + configuredProvider + " was not loaded. Available providers: "
+                                    + providers.stream().map(CacheManagerFactory::describeL1Provider).toList()));
+        }
+        return providers.stream()
+                .min(Comparator
+                        .comparingInt(CacheManagerFactory::l1Priority)
+                        .thenComparing(p -> p.getClass().getName()))
+                .orElseThrow();
+    }
+
+    private static L2Provider selectL2Provider(List<L2Provider> providers, CacheConfig.L2ProviderType configuredProvider) {
+        if (configuredProvider != CacheConfig.L2ProviderType.AUTO) {
+            return providers.stream()
+                    .filter(provider -> provider.providerType() == configuredProvider)
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Configured L2 provider " + configuredProvider + " was not loaded. Available providers: "
+                                    + providers.stream().map(CacheManagerFactory::describeL2Provider).toList()));
+        }
+        return providers.stream()
+                .min(Comparator
+                        .comparingInt(CacheManagerFactory::l2Priority)
+                        .thenComparing(p -> p.getClass().getName()))
+                .orElseThrow();
+    }
+
     private static int l1Priority(L1Provider provider) {
-        String className = provider.getClass().getName().toLowerCase();
-        if (className.contains("caffeine")) {
-            return 0;
-        }
-        if (className.contains("guava")) {
-            return 1;
-        }
-        if (className.contains("jdk")) {
-            return 2;
-        }
-        return 100;
+        return switch (provider.providerType()) {
+            case CAFFEINE -> 0;
+            case GUAVA -> 1;
+            case JDK -> 2;
+            case AUTO -> 100;
+        };
     }
 
     private static int l2Priority(L2Provider provider) {
-        String className = provider.getClass().getName().toLowerCase();
-        if (className.contains("lettuce")) {
-            return 0;
-        }
-        if (className.contains("redisson")) {
-            return 1;
-        }
-        if (className.contains("jedis")) {
-            return 2;
-        }
-        return 100;
+        return switch (provider.providerType()) {
+            case LETTUCE -> 0;
+            case REDISSON -> 1;
+            case JEDIS -> 2;
+            case AUTO -> 100;
+        };
+    }
+
+    private static String describeL1Provider(L1Provider provider) {
+        return provider.providerType() + ":" + provider.getClass().getName();
+    }
+
+    private static String describeL2Provider(L2Provider provider) {
+        return provider.providerType() + ":" + provider.getClass().getName();
     }
 
     private static class NoopL1Provider implements L1Provider {

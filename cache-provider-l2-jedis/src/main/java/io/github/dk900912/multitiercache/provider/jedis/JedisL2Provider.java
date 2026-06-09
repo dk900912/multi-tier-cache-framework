@@ -50,6 +50,11 @@ public class JedisL2Provider implements L2Provider, AutoCloseable {
     }
 
     @Override
+    public CacheConfig.L2ProviderType providerType() {
+        return CacheConfig.L2ProviderType.JEDIS;
+    }
+
+    @Override
     public void initialize(CacheConfig.L2Config config) {
         Objects.requireNonNull(config, "L2 config cannot be null");
         Set<HostAndPort> nodes = parseNodes(config.getHosts());
@@ -95,17 +100,22 @@ public class JedisL2Provider implements L2Provider, AutoCloseable {
 
     private static GenericObjectPoolConfig<Connection> getObjectPoolConfig(CacheConfig.L2Config config) {
         GenericObjectPoolConfig<Connection> poolConfig = new ConnectionPoolConfig();
-        if (config.getMaxTotal() != null) {
-            poolConfig.setMaxTotal(config.getMaxTotal());
+        CacheConfig.Jedis jedis = Objects.requireNonNull(config.getJedis(), "Jedis config cannot be null");
+        Integer maxTotal = config.getMaxTotal() != null ? config.getMaxTotal() : jedis.getMaxTotal();
+        Integer maxIdle = config.getMaxIdle() != null ? config.getMaxIdle() : jedis.getMaxIdle();
+        Integer minIdle = config.getMinIdle() != null ? config.getMinIdle() : jedis.getMinIdle();
+        Duration maxWait = config.getMaxWait() != null ? config.getMaxWait() : jedis.getMaxWait();
+        if (maxTotal != null) {
+            poolConfig.setMaxTotal(maxTotal);
         }
-        if (config.getMaxIdle() != null) {
-            poolConfig.setMaxIdle(config.getMaxIdle());
+        if (maxIdle != null) {
+            poolConfig.setMaxIdle(maxIdle);
         }
-        if (config.getMinIdle() != null) {
-            poolConfig.setMinIdle(config.getMinIdle());
+        if (minIdle != null) {
+            poolConfig.setMinIdle(minIdle);
         }
-        if (config.getMaxWait() != null) {
-            poolConfig.setMaxWait(config.getMaxWait());
+        if (maxWait != null) {
+            poolConfig.setMaxWait(maxWait);
         }
         return poolConfig;
     }

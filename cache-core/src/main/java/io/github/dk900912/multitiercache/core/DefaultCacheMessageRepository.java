@@ -34,11 +34,11 @@ public class DefaultCacheMessageRepository implements CacheMessageRepository {
     }
 
     @Override
-    public void markProcessed(String key, Long generation, Long version) {
+    public void markProcessed(String key, Long version) {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug(
-                    "Ignore marking message as processed in default repository. [key={}, generation={}, version={}]",
-                    key, generation, version
+                    "Ignore marking message as processed in default repository. [key={}, version={}]",
+                    key, version
             );
         }
     }

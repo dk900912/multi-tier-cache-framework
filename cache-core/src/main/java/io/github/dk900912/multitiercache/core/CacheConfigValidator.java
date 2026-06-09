@@ -43,20 +43,42 @@ final class CacheConfigValidator {
         Objects.requireNonNull(l1Provider, "L1Provider cannot be null");
 
         CacheConfig.L1Config l1 = cacheConfig.getL1();
-        if (l1 != null && l1.isRecordStats() && isProvider(l1Provider, "jdk")) {
-            throw new IllegalArgumentException("JDK L1 provider does not support recordStats=true");
+        if (l1 != null
+                && l1.getProvider() != CacheConfig.L1ProviderType.AUTO
+                && l1Provider.providerType() != l1.getProvider()) {
+            throw new IllegalArgumentException("Selected L1 provider " + l1Provider.providerType()
+                    + " does not match configured provider " + l1.getProvider());
         }
-        if (l1 != null && l1.getFineGrainedExpiry() != null && !isProvider(l1Provider, "caffeine")) {
-            throw new IllegalArgumentException("fineGrainedExpiry requires the Caffeine L1 provider");
+        if (l1 != null && l1.isRecordStats() && !l1Provider.supportsRecordStats()) {
+            throw new IllegalArgumentException("Selected L1 provider does not support recordStats=true");
+        }
+        if (l1 != null && l1.getFineGrainedExpiry() != null && !l1Provider.supportsFineGrainedExpiry()) {
+            throw new IllegalArgumentException("Selected L1 provider does not support fineGrainedExpiry");
         }
     }
 
     static void validateResolvedL2Provider(CacheConfig cacheConfig, L2Provider l2Provider) {
         Objects.requireNonNull(cacheConfig, "CacheConfig cannot be null");
         Objects.requireNonNull(l2Provider, "L2Provider cannot be null");
+
+        CacheConfig.L2Config l2 = cacheConfig.getL2();
+        if (l2 != null
+                && l2.getProvider() != CacheConfig.L2ProviderType.AUTO
+                && l2Provider.providerType() != l2.getProvider()) {
+            throw new IllegalArgumentException("Selected L2 provider " + l2Provider.providerType()
+                    + " does not match configured provider " + l2.getProvider());
+        }
+        if (l2 != null
+                && hasLegacyL2PoolConfig(l2)
+                && l2Provider.providerType() != CacheConfig.L2ProviderType.JEDIS) {
+            throw new IllegalArgumentException(
+                    "Legacy L2 maxTotal/maxIdle/minIdle/maxWait settings are only supported by Jedis; "
+                            + "use provider-specific settings for " + l2Provider.providerType());
+        }
     }
 
     private static void validateL1(CacheConfig.L1Config l1) {
+        Objects.requireNonNull(l1.getProvider(), "L1 provider cannot be null");
         requirePositiveIfPresent(l1.getMaximumSize(), "L1 maximumSize");
         requirePositiveDurationIfPresent(l1.getExpireAfterWrite(), "L1 expireAfterWrite");
         requirePositiveDurationIfPresent(l1.getExpireAfterAccess(), "L1 expireAfterAccess");
@@ -67,6 +89,7 @@ final class CacheConfigValidator {
             return;
         }
 
+        Objects.requireNonNull(l2.getProvider(), "L2 provider cannot be null");
         List<String> hosts = l2.getHosts();
         if (hosts == null || hosts.isEmpty()) {
             throw new IllegalArgumentException("L2 hosts cannot be empty when L2 cache is enabled");
@@ -84,15 +107,9 @@ final class CacheConfigValidator {
         requirePositiveDurationIfPresent(l2.getSocketTimeout(), "L2 socketTimeout");
         requireNonNegativeIfPresent(l2.getMaxRedirects(), "L2 maxRedirects");
 
-        if (l2.getMaxTotal() != null && l2.getMaxIdle() != null && l2.getMaxIdle() > l2.getMaxTotal()) {
-            throw new IllegalArgumentException("L2 maxIdle must be less than or equal to maxTotal");
-        }
-        if (l2.getMaxIdle() != null && l2.getMinIdle() != null && l2.getMinIdle() > l2.getMaxIdle()) {
-            throw new IllegalArgumentException("L2 minIdle must be less than or equal to maxIdle");
-        }
-        if (l2.getMaxTotal() != null && l2.getMinIdle() != null && l2.getMinIdle() > l2.getMaxTotal()) {
-            throw new IllegalArgumentException("L2 minIdle must be less than or equal to maxTotal");
-        }
+        validateJedis(Objects.requireNonNull(l2.getJedis(), "Jedis config cannot be null"));
+        validateRedisson(Objects.requireNonNull(l2.getRedisson(), "Redisson config cannot be null"));
+        validatePoolBounds(l2.getMaxTotal(), l2.getMaxIdle(), l2.getMinIdle(), "Legacy L2");
 
         String username = trimToNull(l2.getUsername());
         String password = trimToNull(l2.getPassword());
@@ -104,6 +121,45 @@ final class CacheConfigValidator {
         }
         if (username != null && password == null) {
             throw new IllegalArgumentException("L2 password must be provided when username is set");
+        }
+    }
+
+    private static void validateJedis(CacheConfig.Jedis jedis) {
+        requirePositiveIfPresent(jedis.getMaxTotal(), "Jedis maxTotal");
+        requireNonNegativeIfPresent(jedis.getMaxIdle(), "Jedis maxIdle");
+        requireNonNegativeIfPresent(jedis.getMinIdle(), "Jedis minIdle");
+        requirePositiveDurationIfPresent(jedis.getMaxWait(), "Jedis maxWait");
+        validatePoolBounds(jedis.getMaxTotal(), jedis.getMaxIdle(), jedis.getMinIdle(), "Jedis");
+    }
+
+    private static void validateRedisson(CacheConfig.Redisson redisson) {
+        requirePositiveIfPresent(redisson.getMasterConnectionPoolSize(), "Redisson masterConnectionPoolSize");
+        requirePositiveIfPresent(redisson.getSlaveConnectionPoolSize(), "Redisson slaveConnectionPoolSize");
+        requireNonNegativeIfPresent(redisson.getMasterConnectionMinimumIdleSize(), "Redisson masterConnectionMinimumIdleSize");
+        requireNonNegativeIfPresent(redisson.getSlaveConnectionMinimumIdleSize(), "Redisson slaveConnectionMinimumIdleSize");
+        if (redisson.getMasterConnectionPoolSize() != null
+                && redisson.getMasterConnectionMinimumIdleSize() != null
+                && redisson.getMasterConnectionMinimumIdleSize() > redisson.getMasterConnectionPoolSize()) {
+            throw new IllegalArgumentException(
+                    "Redisson masterConnectionMinimumIdleSize must be less than or equal to masterConnectionPoolSize");
+        }
+        if (redisson.getSlaveConnectionPoolSize() != null
+                && redisson.getSlaveConnectionMinimumIdleSize() != null
+                && redisson.getSlaveConnectionMinimumIdleSize() > redisson.getSlaveConnectionPoolSize()) {
+            throw new IllegalArgumentException(
+                    "Redisson slaveConnectionMinimumIdleSize must be less than or equal to slaveConnectionPoolSize");
+        }
+    }
+
+    private static void validatePoolBounds(Integer maxTotal, Integer maxIdle, Integer minIdle, String prefix) {
+        if (maxTotal != null && maxIdle != null && maxIdle > maxTotal) {
+            throw new IllegalArgumentException(prefix + " maxIdle must be less than or equal to maxTotal");
+        }
+        if (maxIdle != null && minIdle != null && minIdle > maxIdle) {
+            throw new IllegalArgumentException(prefix + " minIdle must be less than or equal to maxIdle");
+        }
+        if (maxTotal != null && minIdle != null && minIdle > maxTotal) {
+            throw new IllegalArgumentException(prefix + " minIdle must be less than or equal to maxTotal");
         }
     }
 
@@ -198,7 +254,10 @@ final class CacheConfigValidator {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static boolean isProvider(Object provider, String token) {
-        return provider.getClass().getName().toLowerCase().contains(token);
+    private static boolean hasLegacyL2PoolConfig(CacheConfig.L2Config l2) {
+        return l2.getMaxTotal() != null
+                || l2.getMaxIdle() != null
+                || l2.getMinIdle() != null
+                || l2.getMaxWait() != null;
     }
 }

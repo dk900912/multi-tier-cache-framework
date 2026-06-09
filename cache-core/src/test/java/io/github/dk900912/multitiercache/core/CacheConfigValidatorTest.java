@@ -87,6 +87,60 @@ class CacheConfigValidatorTest {
                 config, new GuavaStyleL1Provider()));
     }
 
+    @Test
+    void shouldFailWhenConfiguredL1ProviderDoesNotMatchResolvedProvider() {
+        CacheConfig config = validConfig();
+        config.getL1().setProvider(CacheConfig.L1ProviderType.CAFFEINE);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL1Provider(
+                config, new GuavaStyleL1Provider()));
+    }
+
+    @Test
+    void shouldFailWhenConfiguredL2ProviderDoesNotMatchResolvedProvider() {
+        CacheConfig config = validConfig();
+        config.getL2().setProvider(CacheConfig.L2ProviderType.REDISSON);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new JedisStyleL2Provider()));
+    }
+
+    @Test
+    void shouldFailWhenLegacyL2PoolConfigIsUsedByNonJedisProvider() {
+        CacheConfig config = validConfig();
+        config.getL2().setMaxTotal(20);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new LettuceStyleL2Provider()));
+    }
+
+    @Test
+    void shouldAllowLegacyL2PoolConfigForJedisProvider() {
+        CacheConfig config = validConfig();
+        config.getL2().setMaxTotal(20);
+
+        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new JedisStyleL2Provider()));
+    }
+
+    @Test
+    void shouldFailWhenRedissonMinimumIdleExceedsPoolSize() {
+        CacheConfig config = validConfig();
+        config.getL2().getRedisson().setMasterConnectionPoolSize(2);
+        config.getL2().getRedisson().setMasterConnectionMinimumIdleSize(3);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(config));
+    }
+
+    @Test
+    void shouldFailWhenJedisPoolBoundsAreInvalid() {
+        CacheConfig config = validConfig();
+        config.getL2().getJedis().setMaxIdle(1);
+        config.getL2().getJedis().setMinIdle(2);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(config));
+    }
+
     private static CacheConfig validConfig() {
         CacheConfig config = new CacheConfig();
         config.getL2().setHosts(List.of("127.0.0.1:6379"));
@@ -94,6 +148,21 @@ class CacheConfigValidatorTest {
     }
 
     private static final class CaffeineStyleL1Provider implements L1Provider {
+        @Override
+        public CacheConfig.L1ProviderType providerType() {
+            return CacheConfig.L1ProviderType.CAFFEINE;
+        }
+
+        @Override
+        public boolean supportsRecordStats() {
+            return true;
+        }
+
+        @Override
+        public boolean supportsFineGrainedExpiry() {
+            return true;
+        }
+
         @Override
         public Object get(CacheKey key) {
             return null;
@@ -114,6 +183,16 @@ class CacheConfigValidatorTest {
 
     private static final class GuavaStyleL1Provider implements L1Provider {
         @Override
+        public CacheConfig.L1ProviderType providerType() {
+            return CacheConfig.L1ProviderType.GUAVA;
+        }
+
+        @Override
+        public boolean supportsRecordStats() {
+            return true;
+        }
+
+        @Override
         public Object get(CacheKey key) {
             return null;
         }
@@ -133,6 +212,11 @@ class CacheConfigValidatorTest {
 
     private static final class JdkStyleL1Provider implements L1Provider {
         @Override
+        public CacheConfig.L1ProviderType providerType() {
+            return CacheConfig.L1ProviderType.JDK;
+        }
+
+        @Override
         public Object get(CacheKey key) {
             return null;
         }
@@ -150,7 +234,7 @@ class CacheConfigValidatorTest {
         }
     }
 
-    private static final class NoopL2Provider implements L2Provider {
+    private static class NoopL2Provider implements L2Provider {
         @Override
         public String get(CacheKey key) {
             return null;
@@ -177,6 +261,20 @@ class CacheConfigValidatorTest {
         @Override
         public Object eval(String script, List<String> keys, List<String> args) {
             return null;
+        }
+    }
+
+    private static final class JedisStyleL2Provider extends NoopL2Provider {
+        @Override
+        public CacheConfig.L2ProviderType providerType() {
+            return CacheConfig.L2ProviderType.JEDIS;
+        }
+    }
+
+    private static final class LettuceStyleL2Provider extends NoopL2Provider {
+        @Override
+        public CacheConfig.L2ProviderType providerType() {
+            return CacheConfig.L2ProviderType.LETTUCE;
         }
     }
 

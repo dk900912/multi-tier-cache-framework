@@ -30,6 +30,21 @@ public class CaffeineL1Provider implements L1Provider {
     public CaffeineL1Provider() {
     }
 
+    @Override
+    public CacheConfig.L1ProviderType providerType() {
+        return CacheConfig.L1ProviderType.CAFFEINE;
+    }
+
+    @Override
+    public boolean supportsRecordStats() {
+        return true;
+    }
+
+    @Override
+    public boolean supportsFineGrainedExpiry() {
+        return true;
+    }
+
     public CaffeineL1Provider(Long maximumSize,
                               Duration expireAfterWrite,
                               Duration expireAfterAccess,

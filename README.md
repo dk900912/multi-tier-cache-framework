@@ -6,11 +6,11 @@
 ![Redis ACL](https://img.shields.io/badge/Redis-ACL-8E44AD?style=flat-square&logo=redis&logoColor=white)
 ![L1 + L2](https://img.shields.io/badge/Cache-L1%20%2B%20L2-16A085?style=flat-square)
 ![SingleFlight](https://img.shields.io/badge/SingleFlight-Built--in-F39C12?style=flat-square)
-![Generation + Version](https://img.shields.io/badge/Consistency-Generation%20%2B%20Version-34495E?style=flat-square)
+![Version CAS](https://img.shields.io/badge/Consistency-Version%20CAS-34495E?style=flat-square)
 ![Observability](https://img.shields.io/badge/Observability-Built--in-2ECC71?style=flat-square)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.dk900912/multi-tier-cache-framework?style=flat-square&color=blue)](https://central.sonatype.com/search?q=io.github.dk900912)
 
-  <p>一个面向 Java 应用的 L1 + L2 多级缓存框架，重点解决缓存击穿、缓存穿透、删后重建、乱序消息、跨节点 L1 失效和最终一致性问题。</p>
+  <p>一个面向 Java 应用的 L1 + L2 多级缓存框架，重点解决缓存击穿、缓存穿透、乱序消息、跨节点 L1 失效和最终一致性问题。</p>
 </div>
 
 ## 1. 文档定位
@@ -19,7 +19,7 @@
 
 - 这个框架到底解决什么问题，不解决什么问题
 - 读缓存与写缓存如何保证最终一致
-- `generation + version` 为什么能解决删后重建
+- 业务 `version` 和删除墓碑如何阻止乱序覆盖与旧读回填
 - `L1`、`L2`、Pub/Sub、补偿重放分别承担什么职责
 - Redis keyspace、Lua 脚本、补偿边界、可观测性与生产限制分别是什么
 
@@ -31,10 +31,10 @@
 | :---: | :---: | :---: |
 | `L1 + L2` 多级缓存 | 支持 | `L1` 做本地热点加速，`L2` 做跨节点共享与裁决 |
 | 缓存击穿保护 | 支持 | 内置 `SingleFlight`，同 key 并发 miss 只让一个线程回源 |
-| 缓存穿透防护 | 支持 | `PENETRATE(generation=0, version=-1)` 低优先级短 TTL 哨兵 |
-| 最终一致性裁决 | 支持 | 基于 `generation + version`，由 Redis Lua 脚本原子裁决 |
-| 删后重建 | 支持 | `reinsert` 通过新 `generation` 压过旧 tombstone |
-| 乱序 / 重复消息抗性 | 支持 | `L2` 与 `L1` 共用同一套代际和版本比较规则 |
+| 缓存穿透防护 | 支持 | `PENETRATE(version=-1)` 低优先级短 TTL 哨兵 |
+| 最终一致性裁决 | 支持 | 基于业务 `version`，由 Redis Lua 脚本原子裁决 |
+| 同 key 删后重建 | 不支持 | DB 删除后再次新增必须使用新主键，并形成新缓存 key |
+| 乱序 / 重复消息抗性 | 支持 | `L2` 与 `L1` 共用同一套版本和状态比较规则 |
 | 可观测性 | 支持 | 内置运行时指标快照 `CacheRuntimeStats` |
 | Redis Cluster / ACL | 支持 | 已支持集群和 Redis 7 ACL |
 | 可靠广播 | 不支持 | 当前基于 Redis Pub/Sub，不保证 peer 节点可靠收到 |
@@ -42,13 +42,13 @@
 
 ### 2.2 一句话理解
 
-> `L2` 是权威裁决点，`L1` 是可丢弃副本，Pub/Sub 只是失效加速器，真正的一致性靠 `generation + version + Lua CAS` 落地。
+> `L2` 是权威裁决点，`L1` 是可丢弃副本，Pub/Sub 只是失效加速器，真正的一致性靠业务 `version + Lua CAS` 落地。
 
 ### 2.3 适用场景
 
 - 业务允许跨节点存在极短暂陈旧窗口，但要求最终收敛
 - 希望在 Java 应用内利用本地缓存显著提升热点命中率
-- 需要解决删后重建、并发回填、乱序消息、重复消息等缓存一致性问题
+- 需要解决并发回填、乱序消息、重复消息等缓存一致性问题
 - 已接受 Redis 作为共享缓存与协调中心
 
 ### 2.4 非目标
@@ -57,12 +57,13 @@
 - 不保证同一 key 的全局有序消费
 - 不保证 peer 节点对 Pub/Sub 消息的可靠接收
 - 默认实现不提供真正持久化的补偿仓库
+- 不支持同一个缓存 key 在 DB 删除后以重置或更低版本复活
 
 ## 3. 模块结构
 
 ### 3.1 多模块发布
 
-当前版本：`1.0.0-M2`
+当前版本：`1.0.0-M4`
 
 | 模块 | 职责 | 说明 |
 | :---: | :---: | :---: |
@@ -115,7 +116,7 @@ graph TD
     <dependency>
       <groupId>io.github.dk900912</groupId>
       <artifactId>multi-tier-cache-framework</artifactId>
-      <version>1.0.0-M3</version>
+      <version>1.0.0-M4</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>
@@ -153,8 +154,12 @@ graph TD
 
 ```java
 import io.github.dk900912.multitiercache.api.CacheKey;
+import io.github.dk900912.multitiercache.api.CacheLoader;
 import io.github.dk900912.multitiercache.api.CacheManager;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
+import io.github.dk900912.multitiercache.api.model.CacheConfig.L1ProviderType;
+import io.github.dk900912.multitiercache.api.model.CacheConfig.L2ProviderType;
+import io.github.dk900912.multitiercache.api.model.CacheLoadResult;
 import io.github.dk900912.multitiercache.core.CacheManagerFactory;
 
 import java.time.Duration;
@@ -166,43 +171,80 @@ public class CacheExample {
         CacheConfig config = new CacheConfig();
 
         config.getL1().setEnabled(true);
+        config.getL1().setProvider(L1ProviderType.CAFFEINE);
+        config.getL1().setRecordStats(true);
         config.getL1().setMaximumSize(10_000L);
-        config.getL1().setExpireAfterWrite(Duration.ofSeconds(15));
+        config.getL1().setExpireAfterWrite(Duration.ofSeconds(30));
+        config.getL1().setExpireAfterAccess(Duration.ofSeconds(30));
 
         config.getL2().setEnabled(true);
+        config.getL2().setProvider(L2ProviderType.LETTUCE);
         config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
-        config.getL2().setMutationChannelName("cache:mutation");
+        config.getL2().setMutationChannelName("cache:mutation:user");
+        config.getL2().setUsername("cache_user");
+        config.getL2().setPassword("change-me");
+        config.getL2().setConnectionTimeout(Duration.ofSeconds(2));
+        config.getL2().setSocketTimeout(Duration.ofSeconds(2));
+        config.getL2().setMaxRedirects(5);
+        config.getL2().getSubscriber().setCorePoolSize(2);
+        config.getL2().getSubscriber().setMaximumPoolSize(4);
+        config.getL2().getSubscriber().setCapacity(1_000);
 
-        // 生产环境强烈建议显式配置业务包白名单
+        // 生产环境必须显式配置业务包白名单。
         config.getCodec().setTrustedPackages(List.of("com.yourcompany.domain"));
+
+        config.getSingleFlight().setAwaitTimeout(Duration.ofSeconds(3));
+
+        config.getCacheMiss().setDefaultTtl(Duration.ofMinutes(10));
+        config.getCacheMiss().setBackfillTtl(Duration.ofMinutes(10));
+        config.getCacheMiss().setPenetrationTtl(Duration.ofSeconds(30));
+
+        config.getCompensation().setEnabled(true);
+        config.getCompensation().setInitialDelay(Duration.ofSeconds(10));
+        config.getCompensation().setPeriod(Duration.ofSeconds(10));
+        config.getCompensation().setBatchSize(100);
 
         CacheManager cacheManager = CacheManagerFactory.create(config);
         cacheManager.bootstrap();
 
-        CacheKey key = CacheKey.simple("user:1001");
+        try {
+            CacheKey key = CacheKey.simple("user:1001");
 
-        User inserted = userRepository.insert(new User("Alice"));
-        cacheManager.insert(key, inserted, inserted.getVersion(), Duration.ofMinutes(30));
+            User inserted = userRepository.insert(new User("Alice"));
+            cacheManager.insert(key, inserted, inserted.getVersion(), Duration.ofMinutes(30));
 
-        User loaded = cacheManager.get(
-                key,
-                () -> userRepository.findById(1001L),
-                Duration.ofMinutes(30)
-        );
+            CacheLoader<User> loader = () -> {
+                User dbUser = userRepository.findById(1001L);
+                if (dbUser == null) {
+                    return CacheLoadResult.penetration(Duration.ofSeconds(30));
+                }
+                return CacheLoadResult.of(dbUser, dbUser.getVersion(), Duration.ofMinutes(30));
+            };
+            User loaded = cacheManager.get(key, loader);
 
-        User updated = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
-        if (updated != null) {
-            cacheManager.update(key, updated, updated.getVersion(), Duration.ofMinutes(30));
+            User updated = userRepository.updateNameWithOptimisticLock(1001L, "Bob");
+            if (updated != null) {
+                cacheManager.update(key, updated, updated.getVersion(), Duration.ofMinutes(30));
+            }
+
+            User beforeDelete = userRepository.findById(1001L);
+            if (beforeDelete != null) {
+                userRepository.deleteById(1001L);
+                cacheManager.evict(key, beforeDelete.getVersion(), Duration.ofMinutes(5));
+            }
+        } finally {
+            cacheManager.shutdown();
         }
-
-        Long deleteVersion = userRepository.findById(1001L).getVersion();
-        userRepository.deleteById(1001L);
-        cacheManager.evict(key, deleteVersion, Duration.ofMinutes(5));
-
-        cacheManager.shutdown();
     }
 }
 ```
+
+补充：
+
+- 如果只启用单机 `L1`，将 `config.getL2().setEnabled(false)`；如果只启用 `L2`，将 `config.getL1().setEnabled(false)`。
+- `L2ProviderType.AUTO` 当前按 `LETTUCE -> REDISSON -> JEDIS` 选择；生产建议显式指定 provider。
+- 使用 `JEDIS` 或 `REDISSON` 时，分别通过 `config.getL2().getJedis()` 或 `config.getL2().getRedisson()` 调整专属连接池参数。
+- `CacheLoadResult` 允许 loader 显式返回 DB 版本与 TTL，是读回填最终一致性语义最清晰的接入方式。
 
 ### 4.4 业务接入约束
 
@@ -223,8 +265,8 @@ public class CacheExample {
 | `get(key, Supplier<T>)` | 读缓存 | `Supplier` 返回 `null` 会被视为穿透 |
 | `get(key, Supplier<T>, ttl)` | 读缓存 | 为回源结果指定 TTL |
 | `get(key, CacheLoader<T>)` | 读缓存 | 显式返回 `CacheLoadResult`，适合精确控制版本和 TTL |
-| `insert(key, data, version, ttl)` | 写缓存 | 用于插入或删后重建 |
-| `update(key, data, version, ttl)` | 写缓存 | 用于同生命周期内更新 |
+| `insert(key, data, version, ttl)` | 写缓存 | 用于 DB 新增成功后的缓存写入 |
+| `update(key, data, version, ttl)` | 写缓存 | 用于 DB 已有记录更新后的缓存写入 |
 | `evict(key, version, ttl)` | 删除缓存 | 写删除墓碑，不是简单删除 key |
 | `getMonitor()` | 获取监控 | 读取 `L1` 统计和框架运行指标 |
 
@@ -236,8 +278,7 @@ public class CacheExample {
 | :---: | :---: | :---: |
 | `key` | 业务 key 字符串 | 业务方提供 |
 | `data` | 真实数据载荷 | 真实值场景携带 |
-| `generation` | 生命周期代际 | 框架在 `L2` 侧解析/推进 |
-| `version` | 生命周期内版本 | 业务方提供 |
+| `version` | DB 数据版本 | 业务方提供，单条记录生命周期内严格单调递增 |
 | `type` | 消息类型 | `INSERT` / `UPDATE` / `DELETE` / `BACKFILL` / `PENETRATE` |
 | `ttlMillis` | TTL | 调用方或配置决定 |
 
@@ -247,22 +288,20 @@ public class CacheExample {
 
 | 状态 | 是否有数据 | 是否参与业务排序 | 语义 |
 | :---: | :---: | :---: | :---: |
-| `VALUE(generation, version)` | 是 | 是 | 真实业务值 |
-| `DELETE_TOMBSTONE(generation, version)` | 否 | 是 | 业务删除态 |
-| `PENETRATE(generation=0, version=-1)` | 否 | 否 | 低优先级短 TTL 防穿透 hint |
+| `VALUE(version)` | 是 | 是 | 真实业务值 |
+| `DELETE_TOMBSTONE(version)` | 否 | 是 | 业务删除态 |
+| `PENETRATE(version=-1)` | 否 | 否 | 低优先级短 TTL 防穿透 hint |
 
-### 5.4 `generation` 与 `version`
+### 5.4 DB 生命周期与 `version`
 
-| 字段 | 维护方 | 作用 | 是否跨生命周期单调 |
-| :---: | :---: | :---: | :---: |
-| `generation` | 框架 | 区分生命周期，解决删后重建 | 是 |
-| `version` | 业务方 | 同一生命周期内排序 | 只要求同生命周期内单调 |
+本框架严格依赖 DB 数据版本，不再维护框架侧生命周期代际。业务方必须保证：
 
-结论：
+- `insert`、`update`、`evict` 只能在 DB 对应插入、更新、删除成功后调用
+- 同一条 DB 记录从插入到删除的完整生命周期内，`version` 严格单调递增
+- 一条记录被 DB 删除后，如果未来重新新增语义上的同一对象，必须使用新的 DB 主键
+- 缓存 key 必须包含或绑定该主键，因此“删除后复活”的记录必须形成新的缓存 key
 
-- 业务方**不需要**为 `reinsert` 继续维持全生命周期单调 `version`
-- 框架通过新的 `generation` 处理删后重建
-- 同一生命周期内仍要求 `version` 严格单调递增
+同一个缓存 key 在删除墓碑 TTL 内不允许被非 DELETE 消息覆盖。框架将“同 key 删除后以重置版本复活”视为业务契约违规，不提供正确性保证。
 
 ## 6. 一致性设计总览
 
@@ -270,7 +309,7 @@ public class CacheExample {
 
 - `L2` 是权威裁决点
 - `L1` 是本地副本层
-- 写路径先让 `L2` 成为权威，再失效本地 `L1`
+- 写路径先让 `L2` 成为权威，再把当前节点 `L1` 收敛到已接受状态
 - 删除必须落墓碑，不能只广播不落 `L2`
 - 读回填必须先过 `L2` 裁决，再决定是否写 `L1`
 - `PENETRATE` 永远低于真实值和删除墓碑
@@ -280,25 +319,28 @@ public class CacheExample {
 真正的比较键是：
 
 ```text
-order = (generation, version)
+order = (type, version)
 ```
 
 排序规则：
 
-1. `generation` 更大者优先
-2. 同一 `generation` 下：
-   - `INSERT / UPDATE / BACKFILL` 使用 `>`
-   - `DELETE` 使用 `>=`
-3. `PENETRATE` 固定最低优先级：
+1. `PENETRATE` 固定最低优先级：
    - 只允许写入 `ABSENT`
    - 或刷新已有 `PENETRATE`
    - 永远不能覆盖真实值与删除墓碑
+2. `DELETE` 是同 key 删除栅栏：
+   - 覆盖真实值时使用 `incoming.version >= current.version`
+   - 当前已是 `DELETE_TOMBSTONE` 时，只有版本不小于当前墓碑的 DELETE 能刷新墓碑
+   - 当前是 `DELETE_TOMBSTONE` 时，拒绝任何 `INSERT / UPDATE / BACKFILL`
+3. `INSERT / UPDATE / BACKFILL` 写真实值：
+   - 覆盖真实值时必须满足 `incoming.version > current.version`
+   - 可以覆盖 `PENETRATE`
 
 ### 6.3 L1 / L2 / Pub/Sub / 补偿的职责分工
 
 | 组件 | 职责 | 关键约束 |
 | :---: | :---: | :---: |
-| `L1` | 本地热点缓存 | 只做条件回填与条件失效，不做跨节点真相源 |
+| `L1` | 本地热点缓存 | 只做条件回填、当前节点条件收敛和远端条件失效，不做跨节点真相源 |
 | `L2` | 共享缓存 + 一致性裁决 | 通过 Lua 原子脚本决定最终胜者 |
 | `Pub/Sub` | L1 失效加速器 | 不是可靠消息系统 |
 | `CacheMessageRepository` | 当前节点写 L2 失败时的补偿落盘扩展点 | 不能补 peer 节点漏收 Pub/Sub |
@@ -308,79 +350,75 @@ order = (generation, version)
 
 ### 7.1 写缓存总规则
 
-| 操作 | `generation` 变化 | 同代版本比较 | 是否 publish | 备注 |
-| :---: | :---: | :---: | :---: | :---: |
-| `INSERT` | 可能提升 | `>` | 是 | 首次插入或删后重建时可能进入新生命周期 |
-| `UPDATE` | 不提升 | `>` | 是 | 发生在当前生命周期内 |
-| `DELETE` | 不提升 | `>=` | 是 | 必须写墓碑 |
-| `BACKFILL` | 不提升 | `>` | 否 | 读路径自愈，不是业务写事件 |
-| `PENETRATE` | 固定 0 | 不参与 | 否 | 只能写 `ABSENT` 或刷新自身 |
+| 操作 | 版本比较 | 是否 publish | 备注 |
+| :---: | :---: | :---: | :---: |
+| `INSERT` | `>` | 是 | DB 新增成功后的缓存写入，不用于同 key 复活 |
+| `UPDATE` | `>` | 是 | DB 已有记录更新后的缓存写入 |
+| `DELETE` | `>=` | 是 | 必须写墓碑 |
+| `BACKFILL` | `>` | 否 | 读路径自愈，不是业务写事件 |
+| `PENETRATE` | 不参与 | 否 | 只能写 `ABSENT` 或刷新自身 |
 
 ### 7.2 `insert`
 
 #### 业务约束
 
 - DB 插入成功后拿到最新实体和当前生命周期内 `version`
-- 插入可能是“首次写入”，也可能是“删后重建”
-- `generation` 由框架在 `L2` 解析，不需要业务方提供
+- `insert` 必须对应业务方新增一条 DB 记录
+- 已删除记录如果重新新增，必须使用新的 DB 主键和新的缓存 key
 
 #### L2 裁决表
 
 | 当前状态 | 来新状态 | 条件 | 结果 |
 | :---: | :---: | :---: | :---: |
-| `ABSENT` | `VALUE(g, v)` | 总是 | 写入并 `publish` |
-| `VALUE(g1, v1)` | `VALUE(g2, v2)` | `g2 > g1` | 写入并 `publish` |
-| `VALUE(g1, v1)` | `VALUE(g2, v2)` | `g2 = g1 and v2 > v1` | 写入并 `publish` |
-| `DELETE(g1, v1)` | `VALUE(g2, v2)` | `g2 > g1` | 写入并 `publish` |
-| `PENETRATE(-1)` | `VALUE(g, v)` | 总是 | 写入并 `publish` |
+| `ABSENT` | `VALUE(v)` | 总是 | 写入并 `publish` |
+| `VALUE(oldV)` | `VALUE(newV)` | `newV > oldV` | 写入并 `publish` |
+| `DELETE(oldV)` | `VALUE(newV)` | 总是拒绝 | `no-op` |
+| `PENETRATE(-1)` | `VALUE(v)` | 总是 | 写入并 `publish` |
 | 其他情况 | `VALUE(...)` | 不满足条件 | `no-op` |
 
 #### L1 行为
 
-- 当前节点：`L2` 接受成功后，再执行本地 `L1` 条件失效
-- 其他节点：收到 `insert` 消息后，只有当本地条目落后于消息 `(generation, version)` 才删除
+- 当前节点：`L2` 接受成功后，将已接受的 `VALUE` 消息写入或刷新到本地 `L1`
+- 其他节点：收到 `insert` 消息后，只对已存在且落后的本地条目做条件失效；本地原本为空时不预热
 
 ### 7.3 `update`
 
 #### 业务约束
 
 - DB 更新成功后，业务方提供最新实体和最新 `version`
-- `update` 不推进生命周期，只发生在当前 `generation`
+- `update` 必须对应业务方更新一条 DB 已有记录
 
 #### L2 裁决表
 
 | 当前状态 | 来新状态 | 条件 | 结果 |
 | :---: | :---: | :---: | :---: |
-| `ABSENT` | `VALUE(g, v)` | 总是 | 写入并 `publish` |
-| `VALUE(g, oldV)` | `VALUE(g, newV)` | `newV > oldV` | 写入并 `publish` |
-| `DELETE(g1, v1)` | `VALUE(g2, v2)` | `g2 > g1` | 写入并 `publish` |
-| `PENETRATE(-1)` | `VALUE(g, v)` | 总是 | 写入并 `publish` |
+| `ABSENT` | `VALUE(v)` | 总是 | 写入并 `publish` |
+| `VALUE(oldV)` | `VALUE(newV)` | `newV > oldV` | 写入并 `publish` |
+| `DELETE(oldV)` | `VALUE(newV)` | 总是拒绝 | `no-op` |
+| `PENETRATE(-1)` | `VALUE(v)` | 总是 | 写入并 `publish` |
 | 其他情况 | `VALUE(...)` | 不满足条件 | `no-op` |
 
 #### L1 行为
 
-| 本地状态与消息比较 | 动作 |
-| :---: | :---: |
-| `localGeneration < msgGeneration` | 删除本地 `L1` |
-| `localGeneration = msgGeneration and localVersion < msgVersion` | 删除本地 `L1` |
-| 其他情况 | `no-op` |
+- 当前节点：`L2` 接受成功后，将已接受的 `VALUE` 消息写入或刷新到本地 `L1`
+- 其他节点：收到 `update` 消息后，只对已存在且落后的本地条目做条件失效；本地原本为空时不预热
 
 ### 7.4 `delete / evict`
 
 #### 业务约束
 
-- 删除前必须拿到删除前 `version` 或 before-image 中的 `version`
-- 删除不会推进 `generation`
-- 下一次 `reinsert` 才会进入新的生命周期
+- 删除前必须拿到删除对应的 `version`
+- 删除成功后调用 `evict` 写入删除墓碑
+- 同一个缓存 key 在墓碑 TTL 内不允许被非 DELETE 状态覆盖
 
 #### L2 裁决表
 
 | 当前状态 | 来新状态 | 条件 | 结果 |
 | :---: | :---: | :---: | :---: |
-| `ABSENT` | `DELETE(g, v)` | 总是 | 写墓碑并 `publish` |
-| `VALUE(g, oldV)` | `DELETE(g, newV)` | `newV >= oldV` | 写墓碑并 `publish` |
-| `DELETE(g, oldV)` | `DELETE(g, newV)` | `newV >= oldV` | 刷新墓碑并 `publish` |
-| `PENETRATE(-1)` | `DELETE(g, v)` | 总是 | 写墓碑并 `publish` |
+| `ABSENT` | `DELETE(v)` | 总是 | 写墓碑并 `publish` |
+| `VALUE(oldV)` | `DELETE(newV)` | `newV >= oldV` | 写墓碑并 `publish` |
+| `DELETE(oldV)` | `DELETE(newV)` | `newV >= oldV` | 刷新墓碑并 `publish` |
+| `PENETRATE(-1)` | `DELETE(v)` | 总是 | 写墓碑并 `publish` |
 | 其他情况 | `DELETE(...)` | 不满足条件 | `no-op` |
 
 #### 删除特别注意
@@ -389,12 +427,17 @@ order = (generation, version)
 - 删除墓碑 TTL 必须显著长于 `PENETRATE` TTL
 - 删除墓碑的作用不是“缓存一个 null”，而是阻止删后旧读或延迟读把旧值重新灌回缓存
 
+#### L1 行为
+
+- 当前节点：`L2` 接受成功后，将 `DELETE_TOMBSTONE` 写入或刷新到本地 `L1`
+- 其他节点：收到 `delete` 消息后，只对已存在且可被该墓碑覆盖的本地条目做条件失效；本地原本为空时不预热
+
 ### 7.5 读缓存：`L2 hit -> L1 backfill`
 
 当 `L1 miss` 且 `L2 hit`：
 
-- 命中 `VALUE(g, v)`：返回数据，并用 `L1.compute(...)` 条件回填
-- 命中 `DELETE_TOMBSTONE(g, v)`：返回 `null`，并将 `L1` 向删除态收敛
+- 命中 `VALUE(v)`：返回数据，并用 `L1.compute(...)` 条件回填
+- 命中 `DELETE_TOMBSTONE(v)`：返回 `null`，并将 `L1` 向删除态收敛
 - 命中 `PENETRATE(-1)`：返回 `null`，仅允许在 `L1` 不存在或也是 `PENETRATE` 时回填
 
 #### L1 条件回填表
@@ -402,8 +445,9 @@ order = (generation, version)
 | 当前 L1 状态 | 来自 L2 的状态 | 条件 | 动作 |
 | :---: | :---: | :---: | :---: |
 | `ABSENT` | `VALUE / DELETE / PENETRATE` | 合法即写 | 回填 |
-| `VALUE(g1, v1)` | `VALUE(g2, v2)` | `g2 > g1` 或 `g2 = g1 and v2 > v1` | 回填 |
-| `VALUE(g1, v1)` | `DELETE(g2, v2)` | `g2 > g1` 或 `g2 = g1 and v2 >= v1` | 回填/删除 |
+| `VALUE(v1)` | `VALUE(v2)` | `v2 > v1` | 回填 |
+| `VALUE(v1)` | `DELETE(v2)` | `v2 >= v1` | 回填/删除 |
+| `DELETE(v1)` | `VALUE(v2)` | 总是拒绝 | `no-op` |
 | `VALUE / DELETE` | `PENETRATE(-1)` | 总是 | `no-op` |
 | `PENETRATE(-1)` | `VALUE / DELETE` | 总是 | 回填 |
 
@@ -414,9 +458,8 @@ order = (generation, version)
 1. 进入 `SingleFlight`
 2. owner 再次检查 `L1` 和 `L2`
 3. `loader` 返回真实值与真实 `version`
-4. 框架解析当前生命周期 `generation`
-5. 先对 `L2` 执行 `BACKFILL` 原子裁决
-6. 再决定是否回填 `L1`
+4. 先对 `L2` 执行 `BACKFILL` 原子裁决
+5. 再决定是否回填 `L1`
 
 #### 关键约束
 
@@ -428,7 +471,7 @@ order = (generation, version)
 
 当 `L1 miss`、`L2 miss` 且 DB 也 miss：
 
-- 框架写入 `PENETRATE(generation=0, version=-1)`
+- 框架写入 `PENETRATE(version=-1)`
 - 它只表示“当前读路径确认未命中”，不是业务删除事件
 
 #### `PENETRATE` 规则
@@ -538,11 +581,9 @@ sequenceDiagram
     Client->>DB: INSERT
     DB-->>Client: data + version
     Client->>CacheManager: insert(key, data, version, ttl)
-    CacheManager->>L2: RESOLVE_GENERATION_LUA_SCRIPT(insert)
-    L2-->>CacheManager: generation
     CacheManager->>L2: APPLY_MESSAGE_LUA_SCRIPT(insert)
-    Note over L2: generation 更大或同代 version 更大才写入
-    CacheManager->>L1A: compute(...) 条件失效
+    Note over L2: 当前为空、PENETRATE，或新 version 更大时才写入
+    CacheManager->>L1A: compute(...) 写入已接受 VALUE
     L2-->>L1B: PUBLISH insert message
     L1B->>L1B: compute(...) 条件失效
     CacheManager-->>Client: success
@@ -562,11 +603,9 @@ sequenceDiagram
     Client->>DB: UPDATE
     DB-->>Client: data + version
     Client->>CacheManager: update(key, data, version, ttl)
-    CacheManager->>L2: RESOLVE_GENERATION_LUA_SCRIPT(update)
-    L2-->>CacheManager: current generation
     CacheManager->>L2: APPLY_MESSAGE_LUA_SCRIPT(update)
-    Note over L2: 同生命周期内仅当 newVersion > currentVersion 才更新
-    CacheManager->>L1A: compute(...) 条件失效
+    Note over L2: 仅当 newVersion > currentVersion 且当前非 DELETE 时更新
+    CacheManager->>L1A: compute(...) 写入已接受 VALUE
     L2-->>L1B: PUBLISH update message
     L1B->>L1B: compute(...) 条件失效
     CacheManager-->>Client: success
@@ -588,11 +627,9 @@ sequenceDiagram
     Client->>DB: DELETE
     DB-->>Client: success
     Client->>CacheManager: evict(key, version, ttl)
-    CacheManager->>L2: RESOLVE_GENERATION_LUA_SCRIPT(delete)
-    L2-->>CacheManager: current generation
     CacheManager->>L2: APPLY_MESSAGE_LUA_SCRIPT(delete)
     Note over L2: 即使当前不存在，也必须写 DELETE_TOMBSTONE
-    CacheManager->>L1A: compute(...) 条件失效
+    CacheManager->>L1A: compute(...) 写入 DELETE_TOMBSTONE
     L2-->>L1B: PUBLISH delete message
     L1B->>L1B: compute(...) 条件失效
     CacheManager-->>Client: success
@@ -604,7 +641,6 @@ sequenceDiagram
 
 当前 `CacheKeyspace` 的目标如下：
 
-- 保证 `data key` 与 `generation key` 落在同一 Redis Cluster slot
 - 不把原始业务 key 直接暴露到 Redis key 名称中
 - 保留完整 `SHA-256` 熵，避免截断哈希碰撞风险
 - 使用 `Base64URL` 压缩标识长度，兼顾安全性与紧凑性
@@ -614,7 +650,6 @@ sequenceDiagram
 | 键类型 | 格式 | 说明 |
 | :---: | :---: | :---: |
 | 数据键 | `mtc:data:{identifier}` | 存放 `CacheMessage` JSON |
-| 代际键 | `mtc:gen:{identifier}` | 存放生命周期代际元数据 |
 | `identifier` | `SHA-256 + Base64URL(withoutPadding)` | 长度固定 43，字符安全 |
 
 ### 9.3 为什么要这样设计
@@ -624,35 +659,26 @@ sequenceDiagram
 | 业务 key 直接入 Redis | 泄漏 PII、特殊字符、超长 key | 改成 opaque key，不暴露原始业务 key |
 | 截断 hash | 长期规模下碰撞风险更高 | 保留完整 `SHA-256` 熵 |
 | Hex 编码 | 64 字符较长 | `Base64URL` 压缩到 43 字符 |
-| `data/gen` 不同槽 | Lua 无法原子处理 | 通过相同 hash tag 保证同槽 |
+| Redis Cluster | 脚本不能跨 slot 操作多个 key | 当前脚本只访问单个 data key |
 
 ## 10. Lua 脚本职责
 
-### 10.1 `RESOLVE_GENERATION_LUA_SCRIPT`
-
-用途：
-
-- 读取当前数据状态和 generation 元数据
-- 为 `insert/reinsert` 决定是否推进生命周期
-- 为 `update/delete/backfill` 返回当前有效生命周期
-- 强制 `PENETRATE` 使用 `generation=0`
-
-### 10.2 `APPLY_MESSAGE_LUA_SCRIPT`
+### 10.1 `APPLY_MESSAGE_LUA_SCRIPT`
 
 用途：
 
 - 读取当前 `CacheMessage`
-- 原子比较 `generation + version`
+- 原子比较 `type + version`
 - 决定是否写入新状态
 - 在 mutation 路径中原子执行 `SET + PUBLISH`
 
-### 10.3 为什么必须用 Lua
+### 10.2 为什么必须用 Lua
 
 | 如果不用 Lua | 风险 |
 | :---: | :---: |
 | Java 侧先 `GET` 再 `SET` | 读写窗口会被并发穿透，产生 TOCTOU 问题 |
 | `SET` 与 `PUBLISH` 分离 | 无法保证同一 winner 的落库与广播语义一致 |
-| `generation` 在多节点本地推导 | 删后重建会出现生命周期分裂 |
+| 非原子版本比较 | 旧版本或重复消息可能覆盖新状态 |
 
 ## 11. 配置参考
 
@@ -661,6 +687,7 @@ sequenceDiagram
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
 | `enabled` | `boolean` | 是否启用 `L1` | `true` |
+| `provider` | `L1ProviderType` | `L1` Provider 选择，`AUTO` 按内置优先级选择 | `AUTO` |
 | `recordStats` | `boolean` | 是否记录 `L1` 原生统计 | `false` |
 | `maximumSize` | `Long` | `L1` 最大条目数 | `1000` |
 | `expireAfterWrite` | `Duration` | 写后全局过期时间 | `15s` |
@@ -669,34 +696,55 @@ sequenceDiagram
 
 补充：
 
+- `AUTO` 下当前内置优先级为 `CAFFEINE -> GUAVA -> JDK`
 - `fineGrainedExpiry` 仅在 `CaffeineL1Provider` 下生效
 - `JdkL1Provider` 不支持 `recordStats=true`
 - `L1` TTL 是最后一道陈旧数据兜底，不应配置得过长
+- 当前 `L1` 原生过期由 `expireAfterWrite / expireAfterAccess` 或 Caffeine 细粒度策略决定，不内置按 `CacheMessage.ttlMillis` 自动逐条过期
 
 ### 11.2 `L2Config`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
 | `enabled` | `boolean` | 是否启用 `L2` | `true` |
+| `provider` | `L2ProviderType` | `L2` Provider 选择，`AUTO` 按内置优先级选择 | `AUTO` |
 | `mutationChannelName` | `String` | Pub/Sub 变更频道 | `multi-tier-cache-mutation` |
 | `hosts` | `List<String>` | Redis 节点列表 | 必填 |
-| `maxTotal` | `Integer` | 连接池最大活跃数 | `10` |
-| `maxIdle` | `Integer` | 最大空闲连接数 | `1` |
-| `minIdle` | `Integer` | 最小空闲连接数 | `1` |
-| `maxWait` | `Duration` | 取连接最大等待时间 | `6s` |
 | `connectionTimeout` | `Duration` | 连接超时 | `6s` |
 | `socketTimeout` | `Duration` | 读写超时 | `6s` |
 | `maxRedirects` | `Integer` | 集群最大重定向次数 | `5` |
 | `username` | `String` | Redis ACL 用户名 | `null` |
 | `password` | `String` | Redis 密码 | `null` |
+| `jedis` | `Jedis` | Jedis 专属连接池配置 | 见下表 |
+| `redisson` | `Redisson` | Redisson 专属连接池配置 | 见下表 |
 
 补充：
 
+- `AUTO` 下当前内置优先级为 `LETTUCE -> REDISSON -> JEDIS`
 - 启用 `L2` 时，`hosts` 与 `mutationChannelName` 必填
 - ACL 模式下建议显式配置 `username + password`
 - Redis 7 中 key 权限与 channel 权限分离，生产授权时需要同时放行
+- 历史版本的 `maxTotal/maxIdle/minIdle/maxWait` 通用池化字段已改为 legacy，仅 Jedis 继续兼容；Lettuce/Redisson 使用这些字段会在 provider 校验阶段失败
 
-### 11.3 `L2Config.Subscriber`
+### 11.3 `L2Config.Jedis`
+
+| 字段 | 类型 | 含义 | 默认值 |
+| :---: | :---: | :---: | :---: |
+| `maxTotal` | `Integer` | Jedis 连接池最大活跃数 | `10` |
+| `maxIdle` | `Integer` | Jedis 连接池最大空闲数 | `1` |
+| `minIdle` | `Integer` | Jedis 连接池最小空闲数 | `1` |
+| `maxWait` | `Duration` | Jedis 取连接最大等待时间 | `6s` |
+
+### 11.4 `L2Config.Redisson`
+
+| 字段 | 类型 | 含义 | 默认值 |
+| :---: | :---: | :---: | :---: |
+| `masterConnectionPoolSize` | `Integer` | master 连接池大小 | `10` |
+| `slaveConnectionPoolSize` | `Integer` | slave 连接池大小 | `10` |
+| `masterConnectionMinimumIdleSize` | `Integer` | master 最小空闲连接数 | `1` |
+| `slaveConnectionMinimumIdleSize` | `Integer` | slave 最小空闲连接数 | `1` |
+
+### 11.5 `L2Config.Subscriber`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
@@ -705,7 +753,7 @@ sequenceDiagram
 | `keepAliveTime` | `Duration` | 非核心线程空闲时间 | `0` |
 | `capacity` | `int` | 队列容量 | `100` |
 
-### 11.4 `CodecConfig`
+### 11.6 `CodecConfig`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
@@ -717,21 +765,26 @@ sequenceDiagram
 - 业务对象所在包必须加入白名单
 - 这是防止 Jackson 多态反序列化 RCE 风险的关键防线
 
-### 11.5 `SingleFlight`
+### 11.7 `SingleFlight`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
 | `awaitTimeout` | `Duration` | 并发 miss 等待 owner 结果的超时时间 | `10s` |
 
-### 11.6 `Compensation`
+### 11.8 `Compensation`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
+| `enabled` | `boolean` | 是否启动本地补偿重放任务 | `true` |
 | `initialDelay` | `Duration` | 首次补偿重放延迟 | `10s` |
 | `period` | `Duration` | 补偿重放周期 | `10s` |
 | `batchSize` | `int` | 每批处理消息数量 | `100` |
 
-### 11.7 `CacheMiss`
+补充：
+
+- 当 `L2` 关闭或没有自定义持久化 `CacheMessageRepository` 时，框架不会启动无意义的补偿重放线程
+
+### 11.9 `CacheMiss`
 
 | 字段 | 类型 | 含义 | 默认值 |
 | :---: | :---: | :---: | :---: |
@@ -747,7 +800,7 @@ sequenceDiagram
 | :---: | :---: | :---: | :---: |
 | 编解码 | `CacheCodec` | `JacksonCacheCodec` | 替换序列化方案 |
 | 本地缓存 | `L1Provider` | `Caffeine` / `Guava` / `JDK` | 替换本地缓存实现 |
-| 分布式缓存 | `L2Provider` | `Lettuce` / `Jedis` / `Redisson` | 替换 Redis 客户端或接入其他 KV |
+| 分布式缓存 | `L2Provider` | `Lettuce` / `Redisson` / `Jedis` | 替换 Redis 客户端或接入其他 KV |
 | 补偿仓库 | `CacheMessageRepository` | `DefaultCacheMessageRepository` | 接入 DB / MQ 做真实持久化补偿 |
 
 ### 12.2 `CacheMessageRepository` 的真实职责边界
@@ -789,6 +842,7 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 | `l1Misses` | `L1` miss 次数 | 判断本地缓存缺口 |
 | `l2Hits` | `L2` 命中次数 | 观察共享缓存兜底效果 |
 | `l2Misses` | `L2` miss 次数 | 判断回源频率 |
+| `l2ReadFailures` | `L2` 读取、解码或校验失败次数 | 观察 Redis 读降级是否发生 |
 | `loaderCalls` | 实际执行 loader 次数 | 判断真实回源压力 |
 | `loaderValueCalls` | loader 返回真实值次数 | 观察正常回填量 |
 | `loaderPenetrationCalls` | loader 进入穿透次数 | 观察穿透压力 |
@@ -799,8 +853,8 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 | :---: | :---: | :---: |
 | `l1BackfillApplied` | `L1` 条件回填成功次数 | 观察 `L1` 向 `L2` 收敛频率 |
 | `l1BackfillSkipped` | `L1` 条件回填被拒绝次数 | 识别旧回填竞争 |
-| `l1InvalidationsApplied` | `L1` 条件失效成功次数 | 判断广播和本地写后失效是否生效 |
-| `l1InvalidationsSkipped` | `L1` 条件失效被跳过次数 | 判断消息到达时本地已更新或已空 |
+| `l1InvalidationsApplied` | `L1` 条件收敛或条件失效成功次数 | 判断本地写收敛和广播失效是否生效 |
+| `l1InvalidationsSkipped` | `L1` 条件收敛或条件失效被跳过次数 | 判断消息到达时本地已更新或已空 |
 
 #### L2 裁决指标
 
@@ -834,7 +888,8 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 | 一致性裁决 | `l2ReadApplyRejected / l2MutationApplyRejected` | 判断旧回填、乱序、重复消息比例 |
 | 补偿安全 | `compensationSaveFailures / replayMessagesFailed` | 最终一致性兜底告警 |
 | 穿透压力 | `loaderPenetrationCalls` | 判断空查与冷 key 扫描 |
-| 失效传播 | `pubSubMessagesReceived / l1InvalidationsApplied` | 观察跨节点失效活跃度 |
+| 读降级 | `l2ReadFailures / loaderCalls` | 判断 Redis 读故障是否正在把压力导向 DB |
+| 收敛传播 | `pubSubMessagesReceived / l1InvalidationsApplied` | 观察跨节点 L1 收敛与失效活跃度 |
 
 ### 13.4 指标解读注意事项
 
@@ -854,7 +909,8 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 | 本地热点加速 | 能 |
 | 乱序 / 重复消息抗性 | 能 |
 | 删除与并发读竞争防护 | 能 |
-| 删后重建 | 能 |
+| 同 key 删后重建 | 不能 |
+| 删除后用新 key 新增 | 能 |
 | peer 节点可靠收消息 | 不能 |
 | 默认补偿持久化 | 不能 |
 
@@ -880,19 +936,19 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 
 **不依赖。**
 
-它依赖的是 `generation + version` 乐观裁决，而不是同一 key 的全局顺序消费。即使消息乱序到达，只要新的 `generation/version` 更大，旧消息也会被 `L2` 与 `L1` 裁决拒绝。
+它依赖的是业务 `version` 与消息状态的乐观裁决，而不是同一 key 的全局顺序消费。即使消息乱序到达，只要旧消息版本更小或不满足状态规则，就会被 `L2` 与 `L1` 裁决拒绝。
 
 ### 15.2 为什么 `delete` 用 `>=`，而 `insert/update/backfill` 用 `>`？
 
-因为删除需要允许“同版本 tombstone 覆盖 live value”，这样才能在同代同版本场景下稳定地落删除态，避免 live value 在边界条件下残留。
+因为删除需要允许“同版本 tombstone 覆盖 live value”，这样才能在业务删除成功后稳定落删除态，避免 live value 在边界条件下残留。
 
-### 15.3 为什么 `PENETRATE` 固定为 `generation=0, version=-1`？
+### 15.3 为什么 `PENETRATE` 固定为 `version=-1`？
 
 因为它不是业务状态，只是低优先级短 TTL 空值 hint。它的职责是防穿透，不是参与业务生命周期排序。
 
-### 15.4 为什么写路径要“先写 L2，再失效本地 L1”？
+### 15.4 为什么写路径要“先写 L2，再收敛当前节点 L1”？
 
-如果先删本地 `L1`，并发读线程可能 miss 到旧 `L2`，然后把旧值重新灌回当前节点 `L1`。先让 `L2` 成为权威，再执行本地 `L1` 条件失效，才能堵住这个窗口。
+如果先改或删本地 `L1`，并发读线程可能 miss 到旧 `L2`，然后把旧值重新灌回当前节点 `L1`。先让 `L2` 成为权威后，当前节点只保存已经被 `L2` 接受的 winner 或删除墓碑；远端节点收到 Pub/Sub 后只条件失效已有旧副本，不预热空 `L1`。
 
 ### 15.5 `CacheMessageRepository` 能修复 Pub/Sub 丢消息吗？
 
@@ -930,19 +986,13 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 
 同一个节点内、同一个 `key` 的并发 miss，只会放行一个 owner 线程执行 `loader`，其他线程等待 owner 的结果。框架还会在 owner 真正执行 `loader` 前再次检查 `L1` 和 `L2`，尽量减少重复回源。
 
-#### 💡 拓展建议：如何实现“全局唯一回源”？
+#### 扩展建议：如何实现“全局唯一回源”？
 
-虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader` **接口。
+框架出于轻量化考量未内置分布式锁，但 `CacheLoader` 接口可以承载业务侧的分布式锁逻辑。
 
-如果您确实有极高的一致性要求或 DB 极为脆弱，完全可以在您实现的 `CacheLoader.load()` 逻辑中，自行包裹一层分布式锁（例如 Redisson Lock）。由于框架层已经做好了第一道防线（单机 SingleFlight），这会带来一个极大的架构优势：**分布式锁的竞争压力会被成百上千倍地削弱！**
+如果业务确实有极高一致性要求或 DB 极为脆弱，可以在 `CacheLoader.load()` 内自行包裹分布式锁，例如 Redisson Lock。框架层已有单机 `SingleFlight`，所以分布式锁只会面对每个节点内被合并后的 miss 请求。
 
-#### 💡 拓展建议：如何实现“全局唯一回源”？
-
-虽然框架出于轻量化考量未内置分布式锁，但**本缓存组件已经为您预留了完美的拓展点：`CacheLoader` **接口。
-
-如果您确实有极高的一致性要求或 DB 极为脆弱，完全可以在您实现的 `CacheLoader.load()` 逻辑中，自行包裹一层分布式锁（例如 Redisson Lock）。由于框架层已经做好了第一道防线（单机 SingleFlight），这会带来一个极大的架构优势：**分布式锁的竞争压力会被成百上千倍地削弱！**
-
-> **代码证据 在 DefaultCacheManager.get 里，顺序是：**
+> **代码证据：在 `DefaultCacheManager.get` 里，顺序是：**
 >
 > 1. 先 readFromL1(key)
 > 2. 再 readFromL2(key)
@@ -951,7 +1001,7 @@ System.out.println(runtimeStats.getReplayMessagesApplied());
 >    - readFromL2(key, true)
 > 4. 最后才执行 loader.load()
 >
-> 所以严格来说：用户自定义 CacheLoader 并不需要考虑`double check`， 而是框架先替你用了两轮，再把执行权交给你，最终你只需要聚焦分布式锁逻辑即可！
+> 所以业务自定义 `CacheLoader` 不需要再做框架层面的 double check，只需要聚焦真实回源或分布式锁逻辑。
 
 ### 15.9 为什么仍然建议显式调用 `cacheManager.shutdown()`？
 

@@ -28,6 +28,11 @@ public class JdkL1Provider implements L1Provider {
     public JdkL1Provider() {
     }
 
+    @Override
+    public CacheConfig.L1ProviderType providerType() {
+        return CacheConfig.L1ProviderType.JDK;
+    }
+
     public JdkL1Provider(Long maximumSize, Duration expireAfterWrite, Duration expireAfterAccess) {
         initialize(maximumSize, expireAfterWrite, expireAfterAccess);
     }

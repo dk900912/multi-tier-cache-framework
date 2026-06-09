@@ -23,6 +23,16 @@ class SingleFlightTest {
     }
 
     @Test
+    void testExecute_SlowFirstCall_ShouldNotBeTreatedAsRecursive() {
+        String result = singleFlight.execute("slow-first-key", Duration.ofSeconds(1), () -> {
+            Thread.sleep(100);
+            return "success";
+        });
+
+        assertEquals("success", result);
+    }
+
+    @Test
     void testExecute_ConcurrentCalls_OnlyOneExecution() throws InterruptedException {
         int threads = 50;
         ExecutorService executor = Executors.newFixedThreadPool(threads);
