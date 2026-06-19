@@ -3,11 +3,12 @@ package io.github.dk900912.multitiercache.core;
 import io.github.dk900912.multitiercache.api.CacheKey;
 import io.github.dk900912.multitiercache.api.CacheManager;
 import io.github.dk900912.multitiercache.api.CacheMessageListener;
-import io.github.dk900912.multitiercache.api.CacheMessageRepository;
 import io.github.dk900912.multitiercache.api.CacheMessageSubscription;
+import io.github.dk900912.multitiercache.api.LifecycleManager;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
 import io.github.dk900912.multitiercache.spi.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
+import io.github.dk900912.multitiercache.spi.L2PubSubMode;
 import io.github.dk900912.multitiercache.spi.L2Provider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,8 +18,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.ServiceLoader;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 
 /**
@@ -35,43 +38,57 @@ public class CacheManagerFactory {
     private static final Logger LOGGER = LoggerFactory.getLogger(CacheManagerFactory.class);
 
     public static CacheManager create(CacheConfig cacheConfig) {
-        CacheConfigValidator.validateBase(cacheConfig);
-
-        L1Provider l1Provider = createL1Provider(cacheConfig);
-        L2Provider l2Provider = createL2Provider(cacheConfig);
-        CacheMessageRepository cacheMessageRepository = createCacheMessageRepository();
-        CacheCodec cacheCodec = createCacheCodec(cacheConfig);
-
-        SingleFlight singleFlight = new SingleFlight();
-        CacheRuntimeMetricsRecorder runtimeMetrics = new CacheRuntimeMetricsRecorder();
-
-        DefaultCacheManager cacheManager = new DefaultCacheManager(
-                cacheConfig, l1Provider, l2Provider, cacheMessageRepository, cacheCodec, singleFlight, runtimeMetrics);
-
-        if (!shouldStartCompensationReplayer(cacheConfig, cacheMessageRepository)) {
-            return new LifecycleAwareCacheManager(cacheManager);
-        }
-
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "cache-message-replayer");
-            thread.setDaemon(true);
-            return thread;
-        });
-
-        CacheMessageReplayer cacheMessageReplayer = new CacheMessageReplayer(
-                cacheMessageRepository, cacheManager, cacheConfig, scheduler, runtimeMetrics);
-
-        return new LifecycleAwareCacheManager(cacheManager, cacheMessageReplayer);
+        return create(cacheConfig, new ServiceLoaderProviderLoader(), () -> Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("cache-single-flight-", 1).factory()));
     }
 
-    private static L1Provider createL1Provider(CacheConfig cacheConfig) {
+    static CacheManager create(CacheConfig cacheConfig,
+                               ProviderLoader providerLoader,
+                               Supplier<ExecutorService> executorFactory) {
+        CacheConfigValidator.validateBase(cacheConfig);
+
+        L1Provider l1Provider = null;
+        L2Provider l2Provider = null;
+        CacheCodec cacheCodec = null;
+        ExecutorService singleFlightExecutor = null;
+        DefaultCacheManager cacheManager = null;
+        try {
+            l1Provider = createL1Provider(cacheConfig, providerLoader);
+            l2Provider = createL2Provider(cacheConfig, providerLoader);
+            cacheCodec = createCacheCodec(cacheConfig, providerLoader);
+
+            singleFlightExecutor = executorFactory.get();
+            SingleFlight singleFlight = new SingleFlight(singleFlightExecutor);
+            LifecycleManager singleFlightExecutorLifecycle =
+                    new ExecutorLifecycleManager(singleFlightExecutor, cacheConfig.getOriginLoadLimiter().getLocalLoadWaitTimeout());
+            CacheRuntimeMetricsRecorder runtimeMetrics = new CacheRuntimeMetricsRecorder();
+
+            cacheManager = new DefaultCacheManager(
+                    cacheConfig, l1Provider, l2Provider, cacheCodec, singleFlight, runtimeMetrics);
+
+            return new LifecycleAwareCacheManager(cacheManager, singleFlightExecutorLifecycle);
+        } catch (RuntimeException | Error failure) {
+            if (cacheManager != null) {
+                shutdownCacheManagerAfterCreationFailure(cacheManager, failure);
+                shutdownExecutorAfterCreationFailure(singleFlightExecutor, failure);
+            } else {
+                shutdownExecutorAfterCreationFailure(singleFlightExecutor, failure);
+                closeAfterCreationFailure(cacheCodec, failure);
+                closeAfterCreationFailure(l2Provider, failure);
+                closeAfterCreationFailure(l1Provider, failure);
+            }
+            throw failure;
+        }
+    }
+
+    private static L1Provider createL1Provider(CacheConfig cacheConfig, ProviderLoader providerLoader) {
         CacheConfig.L1Config l1Config = cacheConfig.getL1();
         if (l1Config == null || !l1Config.isEnabled()) {
             LOGGER.info("L1 cache is disabled.");
             return new NoopL1Provider();
         }
 
-        List<L1Provider> providers = loadProviders(L1Provider.class);
+        List<L1Provider> providers = providerLoader.load(L1Provider.class);
         if (providers.isEmpty()) {
             throw new IllegalStateException("No L1Provider was loaded through SPI and L1 cache is enabled");
         }
@@ -83,14 +100,14 @@ public class CacheManagerFactory {
         return provider;
     }
 
-    private static L2Provider createL2Provider(CacheConfig cacheConfig) {
+    private static L2Provider createL2Provider(CacheConfig cacheConfig, ProviderLoader providerLoader) {
         CacheConfig.L2Config l2Config = cacheConfig.getL2();
         if (l2Config == null || !l2Config.isEnabled()) {
             LOGGER.info("L2 cache is disabled.");
             return new NoopL2Provider();
         }
 
-        List<L2Provider> providers = loadProviders(L2Provider.class);
+        List<L2Provider> providers = providerLoader.load(L2Provider.class);
         if (providers.isEmpty()) {
             throw new IllegalStateException("No L2Provider was loaded through SPI and L2 cache is enabled");
         }
@@ -102,23 +119,8 @@ public class CacheManagerFactory {
         return provider;
     }
 
-    private static CacheMessageRepository createCacheMessageRepository() {
-        List<CacheMessageRepository> repositories = loadProviders(CacheMessageRepository.class);
-        if (repositories.isEmpty()) {
-            LOGGER.info("No CacheMessageRepository was loaded through SPI. Falling back to DefaultCacheMessageRepository.");
-            return new DefaultCacheMessageRepository();
-        }
-        if (repositories.size() > 1) {
-            throw new IllegalStateException("Multiple CacheMessageRepository implementations were loaded through SPI: "
-                    + repositories.stream().map(r -> r.getClass().getName()).toList());
-        }
-        CacheMessageRepository repository = repositories.getFirst();
-        LOGGER.info("Selected CacheMessageRepository: {}", repository.getClass().getName());
-        return repository;
-    }
-
-    private static CacheCodec createCacheCodec(CacheConfig cacheConfig) {
-        List<CacheCodec> codecs = loadProviders(CacheCodec.class);
+    private static CacheCodec createCacheCodec(CacheConfig cacheConfig, ProviderLoader providerLoader) {
+        List<CacheCodec> codecs = providerLoader.load(CacheCodec.class);
         if (codecs.isEmpty()) {
             throw new IllegalStateException("No CacheCodec was loaded through SPI");
         }
@@ -130,33 +132,23 @@ public class CacheManagerFactory {
         try {
             codec.initialize(cacheConfig);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to initialize CacheCodec: " + codec.getClass().getName(), e);
+            IllegalStateException failure =
+                    new IllegalStateException("Failed to initialize CacheCodec: " + codec.getClass().getName(), e);
+            closeAfterCreationFailure(codec, failure);
+            throw failure;
         }
         LOGGER.info("Selected CacheCodec: {}", codec.getClass().getName());
         return codec;
-    }
-
-    private static boolean shouldStartCompensationReplayer(CacheConfig cacheConfig, CacheMessageRepository repository) {
-        if (!cacheConfig.getCompensation().isEnabled()) {
-            LOGGER.info("Compensation replayer is disabled by configuration.");
-            return false;
-        }
-        if (cacheConfig.getL2() == null || !cacheConfig.getL2().isEnabled()) {
-            LOGGER.info("Compensation replayer is disabled because L2 cache is disabled.");
-            return false;
-        }
-        if (repository instanceof DefaultCacheMessageRepository) {
-            LOGGER.info("Compensation replayer is disabled because no persistent CacheMessageRepository is configured.");
-            return false;
-        }
-        return true;
     }
 
     private static void initializeL1Provider(L1Provider provider, CacheConfig.L1Config config) {
         try {
             provider.initialize(config);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to initialize L1Provider: " + provider.getClass().getName(), e);
+            IllegalStateException failure =
+                    new IllegalStateException("Failed to initialize L1Provider: " + provider.getClass().getName(), e);
+            closeAfterCreationFailure(provider, failure);
+            throw failure;
         }
     }
 
@@ -164,7 +156,50 @@ public class CacheManagerFactory {
         try {
             provider.initialize(config);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to initialize L2Provider: " + provider.getClass().getName(), e);
+            IllegalStateException failure =
+                    new IllegalStateException("Failed to initialize L2Provider: " + provider.getClass().getName(), e);
+            closeAfterCreationFailure(provider, failure);
+            throw failure;
+        }
+    }
+
+    private static void closeAfterCreationFailure(Object resource, Throwable creationFailure) {
+        if (!(resource instanceof AutoCloseable closeable)) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (Throwable closeFailure) {
+            if (closeFailure != creationFailure) {
+                creationFailure.addSuppressed(closeFailure);
+            }
+        }
+    }
+
+    private static void shutdownExecutorAfterCreationFailure(
+            ExecutorService executor,
+            Throwable creationFailure) {
+        if (executor == null) {
+            return;
+        }
+        try {
+            executor.shutdownNow();
+        } catch (Throwable shutdownFailure) {
+            if (shutdownFailure != creationFailure) {
+                creationFailure.addSuppressed(shutdownFailure);
+            }
+        }
+    }
+
+    private static void shutdownCacheManagerAfterCreationFailure(
+            CacheManager cacheManager,
+            Throwable creationFailure) {
+        try {
+            cacheManager.shutdown();
+        } catch (Throwable shutdownFailure) {
+            if (shutdownFailure != creationFailure) {
+                creationFailure.addSuppressed(shutdownFailure);
+            }
         }
     }
 
@@ -253,6 +288,10 @@ public class CacheManagerFactory {
 
     private static class NoopL2Provider implements L2Provider {
         @Override
+        public void initialize(CacheConfig.L2Config config) {
+        }
+
+        @Override
         public String get(CacheKey key) {
             throw new UnsupportedOperationException("L2 cache is disabled");
         }
@@ -268,18 +307,58 @@ public class CacheManagerFactory {
         }
 
         @Override
-        public void publish(String channel, String message) {
+        public void publish(String channel, String message, L2PubSubMode mode) {
             throw new UnsupportedOperationException("L2 cache is disabled");
         }
 
         @Override
-        public CacheMessageSubscription subscribe(String channel, CacheMessageListener listener) {
+        public CacheMessageSubscription subscribe(String channel, CacheMessageListener listener, L2PubSubMode mode) {
             throw new UnsupportedOperationException("L2 cache is disabled");
         }
 
         @Override
         public Object eval(String script, List<String> keys, List<String> args) {
             throw new UnsupportedOperationException("L2 cache is disabled");
+        }
+    }
+
+    interface ProviderLoader {
+        <T> List<T> load(Class<T> providerType);
+    }
+
+    private static final class ServiceLoaderProviderLoader implements ProviderLoader {
+        @Override
+        public <T> List<T> load(Class<T> providerType) {
+            return loadProviders(providerType);
+        }
+    }
+
+    private static final class ExecutorLifecycleManager implements LifecycleManager {
+
+        private final ExecutorService executor;
+        private final Duration shutdownTimeout;
+
+        private ExecutorLifecycleManager(ExecutorService executor, Duration shutdownTimeout) {
+            this.executor = executor;
+            this.shutdownTimeout = shutdownTimeout;
+        }
+
+        @Override
+        public void bootstrap() {
+            // Executor is ready when constructed.
+        }
+
+        @Override
+        public void shutdown() {
+            executor.shutdownNow();
+            try {
+                if (!executor.awaitTermination(shutdownTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    LOGGER.warn("SingleFlight executor did not terminate within {} ms", shutdownTimeout.toMillis());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while shutting down SingleFlight executor", e);
+            }
         }
     }
 }

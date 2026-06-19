@@ -104,17 +104,8 @@ public class GuavaL1Provider implements L1Provider {
         }
         CacheStats stats = cache.stats();
         L1CacheStats snapshot = new L1CacheStats();
-        snapshot.setRequestCount(stats.requestCount());
         snapshot.setHitCount(stats.hitCount());
-        snapshot.setHitRate(stats.hitRate());
         snapshot.setMissCount(stats.missCount());
-        snapshot.setMissRate(stats.missRate());
-        snapshot.setLoadCount(stats.loadCount());
-        snapshot.setLoadSuccessCount(stats.loadSuccessCount());
-        snapshot.setLoadFailureCount(stats.loadExceptionCount());
-        snapshot.setLoadFailureRate(stats.loadExceptionRate());
-        snapshot.setTotalLoadTime(stats.totalLoadTime());
-        snapshot.setAverageLoadPenalty(stats.averageLoadPenalty());
         snapshot.setEvictionCount(stats.evictionCount());
         return snapshot;
     }

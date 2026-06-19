@@ -16,7 +16,7 @@
 ## 仓库结构
 
 - `cache-api`：对外 API、配置模型、消息模型、SPI。
-- `cache-core`：核心读写路径、`DefaultCacheManager`、`SingleFlight`、Lua 脚本调度、版本比较、补偿重放。
+- `cache-core`：核心读写路径、`DefaultCacheManager`、`SingleFlight`、Lua 脚本调度和版本比较。
 - `cache-codec`：默认 Jackson 编解码，包含反序列化白名单。
 - `cache-provider-l1-jdk`：JDK Map L1 Provider。
 - `cache-provider-l1-guava`：Guava L1 Provider。
@@ -122,7 +122,7 @@ Lua 脚本要求：
 - 跨节点一致性、Redis Lua、Pub/Sub 行为变更：跑 `CacheManagerIntegrationTest`；Redis 不可达时要明确说明集成测试被跳过。
 - 任务完成前尽量跑 `mvn test -DskipITs`，无法运行时说明原因。
 
-测试应尽量通过公共 API 和可观测指标验证行为。例如验证只使用 L1/L2 时，优先断言 `CacheRuntimeStats` 的 L1/L2 hit、miss、apply、failure 指标，而不是只看内部 map 状态。
+测试应尽量通过公共 API 和可观测指标验证行为。例如验证只使用 L1/L2 时，优先断言 `CacheRuntimeStats` 的 L1/L2 hit、miss、回源和 failure 指标，而不是只看内部 map 状态。
 
 ## Review 重点
 
@@ -146,7 +146,3 @@ Lua 脚本要求：
 - 目标测试通过。
 - 若改动影响共享核心逻辑，全量测试通过或明确说明未跑原因。
 - 最终回复说明改动文件、验证命令和结果，不夸大强一致语义。
-
-## 官方指南依据
-
-OpenAI Codex 官方指南建议把 `AGENTS.md` 用作仓库级、可复用的代理说明，覆盖 repo layout、运行方式、build/test/lint 命令、工程约定、禁止事项，以及完成和验证标准。维护本文件时应保持实用、简洁、贴近真实重复摩擦；当代理反复犯同类错误时，再把稳定规则沉淀进来。

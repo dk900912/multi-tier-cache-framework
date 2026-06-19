@@ -5,168 +5,118 @@ import io.github.dk900912.multitiercache.api.model.CacheRuntimeStats;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Thread-safe runtime metrics recorder for cache observability.
+ * Thread-safe recorder for core, actionable cache runtime metrics.
  *
  * @author dukui
  */
 final class CacheRuntimeMetricsRecorder {
 
-    private final LongAdder l1Hits = new LongAdder();
-    private final LongAdder l1Misses = new LongAdder();
-    private final LongAdder l2Hits = new LongAdder();
-    private final LongAdder l2Misses = new LongAdder();
-    private final LongAdder loaderCalls = new LongAdder();
-    private final LongAdder loaderValueCalls = new LongAdder();
-    private final LongAdder loaderPenetrationCalls = new LongAdder();
-    private final LongAdder l1BackfillApplied = new LongAdder();
-    private final LongAdder l1BackfillSkipped = new LongAdder();
-    private final LongAdder l1InvalidationsApplied = new LongAdder();
-    private final LongAdder l1InvalidationsSkipped = new LongAdder();
-    private final LongAdder l2ReadFailures = new LongAdder();
-    private final LongAdder l2ReadApplyAccepted = new LongAdder();
-    private final LongAdder l2ReadApplyRejected = new LongAdder();
-    private final LongAdder l2ReadApplyFailures = new LongAdder();
-    private final LongAdder l2MutationApplyAccepted = new LongAdder();
-    private final LongAdder l2MutationApplyRejected = new LongAdder();
-    private final LongAdder l2MutationApplyFailures = new LongAdder();
-    private final LongAdder compensationSaveSuccesses = new LongAdder();
-    private final LongAdder compensationSaveFailures = new LongAdder();
-    private final LongAdder pubSubMessagesReceived = new LongAdder();
-    private final LongAdder replayRuns = new LongAdder();
-    private final LongAdder replayMessagesFetched = new LongAdder();
-    private final LongAdder replayMessagesSkipped = new LongAdder();
-    private final LongAdder replayMessagesApplied = new LongAdder();
-    private final LongAdder replayMessagesFailed = new LongAdder();
+    private final LongAdder l1HitCount = new LongAdder();
+    private final LongAdder l1MissCount = new LongAdder();
+    private final LongAdder l2HitCount = new LongAdder();
+    private final LongAdder l2MissCount = new LongAdder();
+    private final LongAdder originLoadCount = new LongAdder();
+    private final LongAdder penetrationLoadCount = new LongAdder();
+    private final LongAdder l2ReadPathFailureCount = new LongAdder();
+    private final LongAdder l2MutationRejectedCount = new LongAdder();
+    private final LongAdder l2MutationFailureCount = new LongAdder();
+    private final LongAdder pubSubDroppedMessageCount = new LongAdder();
+    private final LongAdder pubSubInterruptionCount = new LongAdder();
+    private final LongAdder l1UntrustedBypassCount = new LongAdder();
+    private final LongAdder l1RecoveryClearFailureCount = new LongAdder();
+    private final LongAdder distributedLockAttemptCount = new LongAdder();
+    private final LongAdder distributedLockTimeoutCount = new LongAdder();
+    private final LongAdder distributedLockFailureCount = new LongAdder();
+    private final LongAdder distributedLockFailOpenLoadCount = new LongAdder();
 
-    void recordL1Hit() {
-        l1Hits.increment();
+    void recordL1HitCount() {
+        l1HitCount.increment();
     }
 
-    void recordL1Miss() {
-        l1Misses.increment();
+    void recordL1MissCount() {
+        l1MissCount.increment();
     }
 
-    void recordL2Hit() {
-        l2Hits.increment();
+    void recordL2HitCount() {
+        l2HitCount.increment();
     }
 
-    void recordL2Miss() {
-        l2Misses.increment();
+    void recordL2MissCount() {
+        l2MissCount.increment();
     }
 
-    void recordLoaderCall(boolean penetration) {
-        loaderCalls.increment();
+    void recordOriginLoadCount(boolean penetration) {
+        originLoadCount.increment();
         if (penetration) {
-            loaderPenetrationCalls.increment();
-        } else {
-            loaderValueCalls.increment();
+            penetrationLoadCount.increment();
         }
     }
 
-    void recordL1BackfillApplied() {
-        l1BackfillApplied.increment();
+    void recordL2ReadPathFailureCount() {
+        l2ReadPathFailureCount.increment();
     }
 
-    void recordL1BackfillSkipped() {
-        l1BackfillSkipped.increment();
+    void recordL2MutationRejectedCount() {
+        l2MutationRejectedCount.increment();
     }
 
-    void recordL1InvalidationApplied() {
-        l1InvalidationsApplied.increment();
+    void recordL2MutationFailureCount() {
+        l2MutationFailureCount.increment();
     }
 
-    void recordL1InvalidationSkipped() {
-        l1InvalidationsSkipped.increment();
+    void recordPubSubDroppedMessageCount(long count) {
+        if (count > 0) {
+            pubSubDroppedMessageCount.add(count);
+        }
     }
 
-    void recordL2ReadFailure() {
-        l2ReadFailures.increment();
+    void recordPubSubInterruptionCount() {
+        pubSubInterruptionCount.increment();
     }
 
-    void recordL2ReadApplyAccepted() {
-        l2ReadApplyAccepted.increment();
+    void recordL1UntrustedBypassCount() {
+        l1UntrustedBypassCount.increment();
     }
 
-    void recordL2ReadApplyRejected() {
-        l2ReadApplyRejected.increment();
+    void recordL1RecoveryClearFailureCount() {
+        l1RecoveryClearFailureCount.increment();
     }
 
-    void recordL2ReadApplyFailure() {
-        l2ReadApplyFailures.increment();
+    void recordDistributedLockAttemptCount() {
+        distributedLockAttemptCount.increment();
     }
 
-    void recordL2MutationApplyAccepted() {
-        l2MutationApplyAccepted.increment();
+    void recordDistributedLockTimeoutCount() {
+        distributedLockTimeoutCount.increment();
     }
 
-    void recordL2MutationApplyRejected() {
-        l2MutationApplyRejected.increment();
+    void recordDistributedLockFailureCount() {
+        distributedLockFailureCount.increment();
     }
 
-    void recordL2MutationApplyFailure() {
-        l2MutationApplyFailures.increment();
-    }
-
-    void recordCompensationSaveSuccess() {
-        compensationSaveSuccesses.increment();
-    }
-
-    void recordCompensationSaveFailure() {
-        compensationSaveFailures.increment();
-    }
-
-    void recordPubSubMessageReceived() {
-        pubSubMessagesReceived.increment();
-    }
-
-    void recordReplayRun() {
-        replayRuns.increment();
-    }
-
-    void recordReplayMessagesFetched(int count) {
-        replayMessagesFetched.add(count);
-    }
-
-    void recordReplayMessageSkipped() {
-        replayMessagesSkipped.increment();
-    }
-
-    void recordReplayMessageApplied() {
-        replayMessagesApplied.increment();
-    }
-
-    void recordReplayMessageFailed() {
-        replayMessagesFailed.increment();
+    void recordDistributedLockFailOpenLoadCount() {
+        distributedLockFailOpenLoadCount.increment();
     }
 
     CacheRuntimeStats snapshot() {
         return new CacheRuntimeStats(
-                l1Hits.sum(),
-                l1Misses.sum(),
-                l2Hits.sum(),
-                l2Misses.sum(),
-                loaderCalls.sum(),
-                loaderValueCalls.sum(),
-                loaderPenetrationCalls.sum(),
-                l1BackfillApplied.sum(),
-                l1BackfillSkipped.sum(),
-                l1InvalidationsApplied.sum(),
-                l1InvalidationsSkipped.sum(),
-                l2ReadFailures.sum(),
-                l2ReadApplyAccepted.sum(),
-                l2ReadApplyRejected.sum(),
-                l2ReadApplyFailures.sum(),
-                l2MutationApplyAccepted.sum(),
-                l2MutationApplyRejected.sum(),
-                l2MutationApplyFailures.sum(),
-                compensationSaveSuccesses.sum(),
-                compensationSaveFailures.sum(),
-                pubSubMessagesReceived.sum(),
-                replayRuns.sum(),
-                replayMessagesFetched.sum(),
-                replayMessagesSkipped.sum(),
-                replayMessagesApplied.sum(),
-                replayMessagesFailed.sum()
+                l1HitCount.sum(),
+                l1MissCount.sum(),
+                l2HitCount.sum(),
+                l2MissCount.sum(),
+                originLoadCount.sum(),
+                penetrationLoadCount.sum(),
+                l2ReadPathFailureCount.sum(),
+                l2MutationRejectedCount.sum(),
+                l2MutationFailureCount.sum(),
+                pubSubDroppedMessageCount.sum(),
+                pubSubInterruptionCount.sum(),
+                l1UntrustedBypassCount.sum(),
+                l1RecoveryClearFailureCount.sum(),
+                distributedLockAttemptCount.sum(),
+                distributedLockTimeoutCount.sum(),
+                distributedLockFailureCount.sum(),
+                distributedLockFailOpenLoadCount.sum()
         );
     }
 }

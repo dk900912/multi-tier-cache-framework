@@ -6,6 +6,7 @@ import io.github.dk900912.multitiercache.api.CacheMessageSubscription;
 import io.github.dk900912.multitiercache.api.FineGrainedExpiry;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
 import io.github.dk900912.multitiercache.spi.L1Provider;
+import io.github.dk900912.multitiercache.spi.L2PubSubMode;
 import io.github.dk900912.multitiercache.spi.L2Provider;
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +14,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class CacheConfigValidatorTest {
@@ -45,6 +47,32 @@ class CacheConfigValidatorTest {
     }
 
     @Test
+    void shouldUseLocalFailOpenBreakdownProtectionDefaults() {
+        CacheConfig.OriginLoadLimiter singleFlight = new CacheConfig().getOriginLoadLimiter();
+
+        assertEquals(CacheConfig.OriginLoadLimitMode.LOCAL_ONLY,
+                singleFlight.getOriginLoadLimitMode());
+        assertEquals(Duration.ofSeconds(3), singleFlight.getGlobalLoadWaitTimeout());
+        assertEquals(CacheConfig.GlobalLoadFailurePolicy.FAIL_OPEN,
+                singleFlight.getGlobalLoadFailurePolicy());
+    }
+
+    @Test
+    void shouldFailWhenLockWatchdogTimeoutIsInvalid() {
+        CacheConfig nullConfig = validConfig();
+        nullConfig.getL2().setLockWatchdogTimeout(null);
+        assertThrows(NullPointerException.class, () -> CacheConfigValidator.validateBase(nullConfig));
+
+        CacheConfig zeroConfig = validConfig();
+        zeroConfig.getL2().setLockWatchdogTimeout(Duration.ZERO);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(zeroConfig));
+
+        CacheConfig subMillisecondConfig = validConfig();
+        subMillisecondConfig.getL2().setLockWatchdogTimeout(Duration.ofNanos(1));
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(subMillisecondConfig));
+    }
+
+    @Test
     void shouldFailWhenSubscriberPoolBoundsAreInvalid() {
         CacheConfig config = validConfig();
         config.getL2().getSubscriber().setCorePoolSize(4);
@@ -54,17 +82,89 @@ class CacheConfigValidatorTest {
     }
 
     @Test
+    void shouldValidateSubscriberRecoveryConfiguration() {
+        CacheConfig zeroRatio = validConfig();
+        zeroRatio.getL2().getSubscriber().setRecoveryLowWatermarkRatio(0.0d);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(zeroRatio));
+
+        CacheConfig fullRatio = validConfig();
+        fullRatio.getL2().getSubscriber().setRecoveryLowWatermarkRatio(1.0d);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(fullRatio));
+
+        CacheConfig zeroQuietPeriod = validConfig();
+        zeroQuietPeriod.getL2().getSubscriber().setRecoveryQuietPeriod(Duration.ZERO);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(zeroQuietPeriod));
+    }
+
+    @Test
+    void shouldRequireWriteExpiryOnlyWhenBothCacheTiersAreEnabled() {
+        CacheConfig bothTiers = validConfig();
+        bothTiers.getL1().setExpireAfterWrite(null);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(bothTiers));
+
+        CacheConfig l1Only = validConfig();
+        l1Only.getL2().setEnabled(false);
+        l1Only.getL1().setExpireAfterWrite(null);
+        assertDoesNotThrow(() -> CacheConfigValidator.validateBase(l1Only));
+
+        CacheConfig l2Only = validConfig();
+        l2Only.getL1().setEnabled(false);
+        l2Only.getL1().setExpireAfterWrite(null);
+        assertDoesNotThrow(() -> CacheConfigValidator.validateBase(l2Only));
+    }
+
+    @Test
     void shouldFailWhenSingleFlightAwaitTimeoutIsNonPositive() {
         CacheConfig config = validConfig();
-        config.getSingleFlight().setAwaitTimeout(Duration.ZERO);
+        config.getOriginLoadLimiter().setLocalLoadWaitTimeout(Duration.ZERO);
 
         assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(config));
     }
 
     @Test
-    void shouldFailWhenCacheMissDefaultTtlIsNonPositive() {
+    void shouldValidateDistributedLockWaitTimeout() {
+        CacheConfig zeroWait = validConfig();
+        zeroWait.getOriginLoadLimiter().setGlobalLoadWaitTimeout(Duration.ZERO);
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(zeroWait));
+
+        CacheConfig equalToAwait = validConfig();
+        equalToAwait.getOriginLoadLimiter().setOriginLoadLimitMode(
+                CacheConfig.OriginLoadLimitMode.GLOBAL);
+        equalToAwait.getOriginLoadLimiter().setGlobalLoadWaitTimeout(
+                equalToAwait.getOriginLoadLimiter().getLocalLoadWaitTimeout());
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(equalToAwait));
+
+        CacheConfig shortLocalAwait = validConfig();
+        shortLocalAwait.getOriginLoadLimiter().setLocalLoadWaitTimeout(Duration.ofSeconds(1));
+        assertDoesNotThrow(() -> CacheConfigValidator.validateBase(shortLocalAwait));
+    }
+
+    @Test
+    void shouldRequireEnabledL2ForDistributedBreakdownProtection() {
         CacheConfig config = validConfig();
-        config.getCacheMiss().setDefaultTtl(Duration.ZERO);
+        config.getL2().setEnabled(false);
+        config.getOriginLoadLimiter().setOriginLoadLimitMode(
+                CacheConfig.OriginLoadLimitMode.GLOBAL);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(config));
+    }
+
+    @Test
+    void shouldRequireResolvedProviderToSupportDistributedLocks() {
+        CacheConfig config = validConfig();
+        config.getOriginLoadLimiter().setOriginLoadLimitMode(
+                CacheConfig.OriginLoadLimitMode.GLOBAL);
+
+        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new NoopL2Provider()));
+        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedL2Provider(
+                config, new LockingL2Provider()));
+    }
+
+    @Test
+    void shouldFailWhenLoadPolicyDefaultTtlIsNonPositive() {
+        CacheConfig config = validConfig();
+        config.getLoadPolicy().setDefaultTtl(Duration.ZERO);
 
         assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateBase(config));
     }
@@ -102,24 +202,6 @@ class CacheConfigValidatorTest {
         config.getL2().setProvider(CacheConfig.L2ProviderType.REDISSON);
 
         assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL2Provider(
-                config, new JedisStyleL2Provider()));
-    }
-
-    @Test
-    void shouldFailWhenLegacyL2PoolConfigIsUsedByNonJedisProvider() {
-        CacheConfig config = validConfig();
-        config.getL2().setMaxTotal(20);
-
-        assertThrows(IllegalArgumentException.class, () -> CacheConfigValidator.validateResolvedL2Provider(
-                config, new LettuceStyleL2Provider()));
-    }
-
-    @Test
-    void shouldAllowLegacyL2PoolConfigForJedisProvider() {
-        CacheConfig config = validConfig();
-        config.getL2().setMaxTotal(20);
-
-        assertDoesNotThrow(() -> CacheConfigValidator.validateResolvedL2Provider(
                 config, new JedisStyleL2Provider()));
     }
 
@@ -236,6 +318,10 @@ class CacheConfigValidatorTest {
 
     private static class NoopL2Provider implements L2Provider {
         @Override
+        public void initialize(CacheConfig.L2Config config) {
+        }
+
+        @Override
         public String get(CacheKey key) {
             return null;
         }
@@ -249,11 +335,11 @@ class CacheConfigValidatorTest {
         }
 
         @Override
-        public void publish(String channel, String message) {
+        public void publish(String channel, String message, L2PubSubMode mode) {
         }
 
         @Override
-        public CacheMessageSubscription subscribe(String channel, CacheMessageListener listener) {
+        public CacheMessageSubscription subscribe(String channel, CacheMessageListener listener, L2PubSubMode mode) {
             return () -> {
             };
         }
@@ -271,10 +357,10 @@ class CacheConfigValidatorTest {
         }
     }
 
-    private static final class LettuceStyleL2Provider extends NoopL2Provider {
+    private static final class LockingL2Provider extends NoopL2Provider {
         @Override
-        public CacheConfig.L2ProviderType providerType() {
-            return CacheConfig.L2ProviderType.LETTUCE;
+        public boolean supportsDistributedLock() {
+            return true;
         }
     }
 

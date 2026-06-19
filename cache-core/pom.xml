@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.dk900912</groupId>
         <artifactId>multi-tier-cache-framework</artifactId>
-        <version>1.0.0-M4</version>
+        <version>1.0.0-M5</version>
     </parent>
 
     <artifactId>cache-core</artifactId>
@@ -34,6 +34,16 @@
         <dependency>
             <groupId>io.github.dk900912</groupId>
             <artifactId>cache-provider-l2-jedis</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.dk900912</groupId>
+            <artifactId>cache-provider-l2-lettuce</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.dk900912</groupId>
+            <artifactId>cache-provider-l2-redisson</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

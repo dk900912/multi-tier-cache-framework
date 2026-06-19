@@ -24,12 +24,12 @@ public final class CacheLuaScripts {
             local publishChannel = ARGV[5]
             local publishEnabled = tonumber(ARGV[6])
 
+            if (not ttlMillis) or ttlMillis <= 0 or ttlMillis ~= math.floor(ttlMillis) then
+                return redis.error_reply('ERR cache TTL must be a positive integer number of milliseconds')
+            end
+
             local function writeValue()
-                if ttlMillis and ttlMillis > 0 then
-                    redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
-                else
-                    redis.call('SET', KEYS[1], ARGV[1])
-                end
+                redis.call('SET', KEYS[1], ARGV[1], 'PX', ttlMillis)
                 if publishEnabled == 1 then
                     redis.call('PUBLISH', publishChannel, ARGV[1])
                 end

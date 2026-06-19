@@ -8,8 +8,8 @@ import java.util.List;
 /**
  * The configuration model for the multi-tier cache framework.
  * <p>
- * Contains nested configurations for L1 cache, L2 cache, SingleFlight protection,
- * local message compensation, and cache miss behavior.
+ * Contains nested configurations for L1 cache, L2 cache, origin load limiting,
+ * and load policy behavior.
  * </p>
  *
  * @author dukui
@@ -17,25 +17,46 @@ import java.util.List;
 public class CacheConfig {
 
     public enum L1ProviderType {
+        /** Automatically selects the preferred available L1 provider. */
         AUTO,
+        /** Uses Caffeine as the in-process L1 cache provider. */
         CAFFEINE,
+        /** Uses Guava Cache as the in-process L1 cache provider. */
         GUAVA,
+        /** Uses the JDK-based in-process L1 cache provider. */
         JDK
     }
 
     public enum L2ProviderType {
+        /** Automatically selects the preferred available L2 provider. */
         AUTO,
+        /** Uses Lettuce as the Redis L2 provider. */
         LETTUCE,
+        /** Uses Redisson as the Redis L2 provider. */
         REDISSON,
+        /** Uses Jedis as the Redis L2 provider. */
         JEDIS
+    }
+
+    public enum OriginLoadLimitMode {
+        /** Collapses concurrent cache loads only within the current JVM. */
+        LOCAL_ONLY,
+        /** Combines local request collapsing with an L2-backed distributed load lock. */
+        GLOBAL
+    }
+
+    public enum GlobalLoadFailurePolicy {
+        /** Falls back to a locally collapsed loader call when distributed lock acquisition fails. */
+        FAIL_OPEN,
+        /** Fails the cache read without invoking the loader when distributed lock acquisition fails. */
+        FAIL_CLOSED
     }
 
     private L1Config l1 = new L1Config();
     private L2Config l2 = new L2Config();
     private CodecConfig codec = new CodecConfig();
-    private SingleFlight singleFlight = new SingleFlight();
-    private Compensation compensation = new Compensation();
-    private CacheMiss cacheMiss = new CacheMiss();
+    private OriginLoadLimiter originLoadLimiter = new OriginLoadLimiter();
+    private LoadPolicy loadPolicy = new LoadPolicy();
 
     public CacheConfig() {
     }
@@ -64,28 +85,20 @@ public class CacheConfig {
         this.codec = codec;
     }
 
-    public SingleFlight getSingleFlight() {
-        return singleFlight;
+    public OriginLoadLimiter getOriginLoadLimiter() {
+        return originLoadLimiter;
     }
 
-    public void setSingleFlight(SingleFlight singleFlight) {
-        this.singleFlight = singleFlight;
+    public void setOriginLoadLimiter(OriginLoadLimiter originLoadLimiter) {
+        this.originLoadLimiter = originLoadLimiter;
     }
 
-    public Compensation getCompensation() {
-        return compensation;
+    public LoadPolicy getLoadPolicy() {
+        return loadPolicy;
     }
 
-    public void setCompensation(Compensation compensation) {
-        this.compensation = compensation;
-    }
-
-    public CacheMiss getCacheMiss() {
-        return cacheMiss;
-    }
-
-    public void setCacheMiss(CacheMiss cacheMiss) {
-        this.cacheMiss = cacheMiss;
+    public void setLoadPolicy(LoadPolicy loadPolicy) {
+        this.loadPolicy = loadPolicy;
     }
 
     /**
@@ -230,30 +243,6 @@ public class CacheConfig {
         private List<String> hosts;
 
         /**
-         * The maximum number of active connections in the pool.
-         */
-        @Deprecated
-        private Integer maxTotal;
-
-        /**
-         * The maximum number of idle connections in the pool.
-         */
-        @Deprecated
-        private Integer maxIdle;
-
-        /**
-         * The minimum number of idle connections in the pool.
-         */
-        @Deprecated
-        private Integer minIdle;
-
-        /**
-         * The maximum time to wait for a connection from the pool.
-         */
-        @Deprecated
-        private Duration maxWait;
-
-        /**
          * The connection timeout duration.
          */
         private Duration connectionTimeout = Duration.ofMillis(6000);
@@ -262,6 +251,11 @@ public class CacheConfig {
          * The socket read/write timeout duration.
          */
         private Duration socketTimeout = Duration.ofMillis(6000);
+
+        /**
+         * The watchdog timeout used by L2 distributed reentrant locks acquired without an explicit lease.
+         */
+        private Duration lockWatchdogTimeout = Duration.ofMillis(30000);
 
         /**
          * The maximum number of redirects to follow in the cluster.
@@ -325,38 +319,6 @@ public class CacheConfig {
             this.hosts = hosts;
         }
 
-        public Integer getMaxTotal() {
-            return maxTotal;
-        }
-
-        public void setMaxTotal(Integer maxTotal) {
-            this.maxTotal = maxTotal;
-        }
-
-        public Integer getMaxIdle() {
-            return maxIdle;
-        }
-
-        public void setMaxIdle(Integer maxIdle) {
-            this.maxIdle = maxIdle;
-        }
-
-        public Integer getMinIdle() {
-            return minIdle;
-        }
-
-        public void setMinIdle(Integer minIdle) {
-            this.minIdle = minIdle;
-        }
-
-        public Duration getMaxWait() {
-            return maxWait;
-        }
-
-        public void setMaxWait(Duration maxWait) {
-            this.maxWait = maxWait;
-        }
-
         public Duration getConnectionTimeout() {
             return connectionTimeout;
         }
@@ -371,6 +333,14 @@ public class CacheConfig {
 
         public void setSocketTimeout(Duration socketTimeout) {
             this.socketTimeout = socketTimeout;
+        }
+
+        public Duration getLockWatchdogTimeout() {
+            return lockWatchdogTimeout;
+        }
+
+        public void setLockWatchdogTimeout(Duration lockWatchdogTimeout) {
+            this.lockWatchdogTimeout = lockWatchdogTimeout;
         }
 
         public Integer getMaxRedirects() {
@@ -530,6 +500,16 @@ public class CacheConfig {
          */
         private int capacity = 100;
 
+        /**
+         * Queue utilization below which an overloaded message processor may recover.
+         */
+        private double recoveryLowWatermarkRatio = 0.5d;
+
+        /**
+         * Minimum rejection-free period required before overload recovery.
+         */
+        private Duration recoveryQuietPeriod = Duration.ofSeconds(1);
+
         public int getCorePoolSize() {
             return corePoolSize;
         }
@@ -561,87 +541,86 @@ public class CacheConfig {
         public void setCapacity(int capacity) {
             this.capacity = capacity;
         }
+
+        public double getRecoveryLowWatermarkRatio() {
+            return recoveryLowWatermarkRatio;
+        }
+
+        public void setRecoveryLowWatermarkRatio(double recoveryLowWatermarkRatio) {
+            this.recoveryLowWatermarkRatio = recoveryLowWatermarkRatio;
+        }
+
+        public Duration getRecoveryQuietPeriod() {
+            return recoveryQuietPeriod;
+        }
+
+        public void setRecoveryQuietPeriod(Duration recoveryQuietPeriod) {
+            this.recoveryQuietPeriod = recoveryQuietPeriod;
+        }
     }
 
     /**
-     * Configuration for the SingleFlight protection mechanism against cache breakdowns.
+     * Configuration for local and global origin load limiting.
      */
-    public static class SingleFlight {
+    public static class OriginLoadLimiter {
         /**
          * The maximum time to wait for a concurrent request to load the data.
          */
-        private Duration awaitTimeout = Duration.ofSeconds(10);
+        private Duration localLoadWaitTimeout = Duration.ofSeconds(10);
 
-        public Duration getAwaitTimeout() {
-            return awaitTimeout;
+        /**
+         * Whether origin loads are limited only within this JVM or globally through L2.
+         */
+        private OriginLoadLimitMode originLoadLimitMode = OriginLoadLimitMode.LOCAL_ONLY;
+
+        /**
+         * Maximum time a local origin load owner waits to acquire the global load lock.
+         * This is not the lock lease time; the acquired lock is kept alive by the provider watchdog.
+         */
+        private Duration globalLoadWaitTimeout = Duration.ofSeconds(3);
+
+        /**
+         * Behavior when the distributed load lock cannot be acquired because of timeout or infrastructure failure.
+         */
+        private GlobalLoadFailurePolicy globalLoadFailurePolicy = GlobalLoadFailurePolicy.FAIL_OPEN;
+
+        public Duration getLocalLoadWaitTimeout() {
+            return localLoadWaitTimeout;
         }
 
-        public void setAwaitTimeout(Duration awaitTimeout) {
-            this.awaitTimeout = awaitTimeout;
+        public void setLocalLoadWaitTimeout(Duration localLoadWaitTimeout) {
+            this.localLoadWaitTimeout = localLoadWaitTimeout;
+        }
+
+        public OriginLoadLimitMode getOriginLoadLimitMode() {
+            return originLoadLimitMode;
+        }
+
+        public void setOriginLoadLimitMode(OriginLoadLimitMode originLoadLimitMode) {
+            this.originLoadLimitMode = originLoadLimitMode;
+        }
+
+        public Duration getGlobalLoadWaitTimeout() {
+            return globalLoadWaitTimeout;
+        }
+
+        public void setGlobalLoadWaitTimeout(Duration globalLoadWaitTimeout) {
+            this.globalLoadWaitTimeout = globalLoadWaitTimeout;
+        }
+
+        public GlobalLoadFailurePolicy getGlobalLoadFailurePolicy() {
+            return globalLoadFailurePolicy;
+        }
+
+        public void setGlobalLoadFailurePolicy(GlobalLoadFailurePolicy globalLoadFailurePolicy) {
+            this.globalLoadFailurePolicy = globalLoadFailurePolicy;
         }
     }
 
     /**
-     * Configuration for the local message compensation mechanism.
+     * Configuration for loader defaults, read backfill, and cache penetration.
      */
-    public static class Compensation {
-        /**
-         * Whether to start the local compensation replayer.
-         */
-        private boolean enabled = true;
-
-        /**
-         * The initial delay before the compensation replayer starts.
-         */
-        private Duration initialDelay = Duration.ofSeconds(10);
-
-        /**
-         * The period between successive executions of the compensation replayer.
-         */
-        private Duration period = Duration.ofSeconds(10);
-
-        /**
-         * The maximum number of unprocessed messages to fetch per batch.
-         */
-        private int batchSize = 100;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public Duration getInitialDelay() {
-            return initialDelay;
-        }
-
-        public void setInitialDelay(Duration initialDelay) {
-            this.initialDelay = initialDelay;
-        }
-
-        public Duration getPeriod() {
-            return period;
-        }
-
-        public void setPeriod(Duration period) {
-            this.period = period;
-        }
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-    }
-
-    /**
-     * Configuration for handling cache misses and cache penetrations.
-     */
-    public static class CacheMiss {
+    public static class LoadPolicy {
         /**
          * The TTL to apply for cache penetration (when the loaded data is null).
          */

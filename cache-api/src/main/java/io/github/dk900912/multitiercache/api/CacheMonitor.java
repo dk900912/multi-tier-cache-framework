@@ -23,8 +23,8 @@ public interface CacheMonitor {
     L1CacheStats getL1CacheStats();
 
     /**
-     * Retrieves runtime counters for core cache operations such as read paths,
-     * L2 apply results, invalidation propagation, and compensation replay.
+     * Retrieves core runtime counters for cache efficiency, L2 failures,
+     * L1 degradation and distributed breakdown protection.
      *
      * @return an immutable snapshot of runtime counters
      */

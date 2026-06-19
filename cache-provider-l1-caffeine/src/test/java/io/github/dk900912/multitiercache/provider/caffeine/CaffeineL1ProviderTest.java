@@ -79,6 +79,42 @@ class CaffeineL1ProviderTest {
     }
 
     @Test
+    void fineGrainedExpiryCannotExtendGlobalWriteExpiry() throws InterruptedException {
+        CaffeineL1Provider provider = new CaffeineL1Provider();
+        CacheConfig.L1Config config = new CacheConfig.L1Config();
+        config.setMaximumSize(100L);
+        config.setExpireAfterWrite(Duration.ofMillis(80));
+        config.setExpireAfterAccess(null);
+        config.setFineGrainedExpiry(new FineGrainedExpiry<String, Object>() {
+            @Override
+            public long expireAfterCreate(String key, Object value, long currentTimeNanos) {
+                return Duration.ofDays(1).toNanos();
+            }
+
+            @Override
+            public long expireAfterUpdate(
+                    String key, Object value, long currentTimeNanos, long currentDurationNanos) {
+                return Duration.ofDays(1).toNanos();
+            }
+
+            @Override
+            public long expireAfterRead(
+                    String key, Object value, long currentTimeNanos, long currentDurationNanos) {
+                return Duration.ofDays(1).toNanos();
+            }
+        });
+        provider.initialize(config);
+
+        CacheKey key = CacheKey.simple("write-expiry-cap");
+        provider.put(key, "value");
+        Thread.sleep(30);
+        assertEquals("value", provider.get(key));
+        Thread.sleep(80);
+
+        assertNull(provider.get(key), "Reads must not extend the global write-expiry bound");
+    }
+
+    @Test
     void testComputeWithNewEntry() {
         CaffeineL1Provider provider = new CaffeineL1Provider();
         CacheConfig.L1Config config = new CacheConfig.L1Config();

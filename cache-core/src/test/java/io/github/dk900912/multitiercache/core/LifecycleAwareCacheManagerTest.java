@@ -50,12 +50,27 @@ class LifecycleAwareCacheManagerTest {
                 "delegate.bootstrap",
                 "first.bootstrap",
                 "failing.bootstrap",
+                "failing.shutdown",
                 "first.shutdown",
                 "delegate.shutdown"
         ), events);
         assertEquals(1, delegate.shutdownCount);
         assertEquals(1, first.shutdownCount);
-        assertEquals(0, failing.shutdownCount);
+        assertEquals(1, failing.shutdownCount);
+    }
+
+    @Test
+    void shouldShutdownDelegateWhenDelegateBootstrapFails() {
+        List<String> events = new ArrayList<>();
+        RecordingCacheManager delegate = new RecordingCacheManager(events);
+        delegate.failOnBootstrap = true;
+        LifecycleAwareCacheManager manager = new LifecycleAwareCacheManager(delegate);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class, manager::bootstrap);
+
+        assertEquals("delegate bootstrap failure", exception.getMessage());
+        assertEquals(List.of("delegate.bootstrap", "delegate.shutdown"), events);
+        assertEquals(1, delegate.shutdownCount);
     }
 
     @Test
@@ -95,6 +110,7 @@ class LifecycleAwareCacheManagerTest {
         private final List<String> events;
         private int bootstrapCount;
         private int shutdownCount;
+        private boolean failOnBootstrap;
 
         private RecordingCacheManager(List<String> events) {
             this.events = events;
@@ -140,6 +156,9 @@ class LifecycleAwareCacheManagerTest {
         public void bootstrap() {
             bootstrapCount++;
             events.add("delegate.bootstrap");
+            if (failOnBootstrap) {
+                throw new IllegalStateException("delegate bootstrap failure");
+            }
         }
 
         @Override

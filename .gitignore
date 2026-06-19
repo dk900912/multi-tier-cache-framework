@@ -137,9 +137,15 @@ buildNumber.properties
 .kiro/*
 
 ### Trce
-.trae
+.trae/*
 
 ### Codex
 .codex/*
+
+### Gemini Review
+.gemini-reviews/*
+
+### Qodana
+qodana.yaml
 
 nul

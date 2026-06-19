@@ -49,7 +49,6 @@ class CacheManagerFactoryProviderSelectionTest {
     private static CacheConfig l1OnlyConfig() {
         CacheConfig config = new CacheConfig();
         config.getL2().setEnabled(false);
-        config.getCompensation().setEnabled(false);
         config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
         return config;
     }

@@ -1,6 +1,7 @@
 package io.github.dk900912.multitiercache.core;
 
 import io.github.dk900912.multitiercache.api.model.CacheMessage;
+
 /**
  * Utility class for comparing cache message versions.
  * <p>

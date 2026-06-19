@@ -23,8 +23,7 @@ public interface L2Provider {
      *
      * @param config the L2 configuration
      */
-    default void initialize(CacheConfig.L2Config config) {
-    }
+    void initialize(CacheConfig.L2Config config);
 
     /**
      * Returns the built-in provider type represented by this implementation.
@@ -32,6 +31,18 @@ public interface L2Provider {
      */
     default CacheConfig.L2ProviderType providerType() {
         return CacheConfig.L2ProviderType.AUTO;
+    }
+
+    /**
+     * Returns whether this provider implements the distributed lock contract.
+     *
+     * Providers returning {@code true} must honor the thread-ownership and watchdog
+     * semantics documented by {@link L2ReentrantLock}.
+     *
+     * @return {@code true} when {@link #getLock(String)} is supported
+     */
+    default boolean supportsDistributedLock() {
+        return false;
     }
 
     /**
@@ -47,7 +58,7 @@ public interface L2Provider {
      *
      * @param key   the cache key
      * @param value the value to cache as a string
-     * @param ttl   the time-to-live duration, or {@code null} for no expiration
+     * @param ttl   the positive time-to-live duration; must resolve to at least one millisecond
      */
     void set(CacheKey key, String value, Duration ttl);
 
@@ -59,21 +70,26 @@ public interface L2Provider {
     void delete(CacheKey key);
 
     /**
-     * Publishes a message to the specified channel.
+     * Publishes a message using the requested Redis Pub/Sub routing mode.
      *
      * @param channel the Pub/Sub channel
      * @param message the message payload
+     * @param mode    the Pub/Sub routing mode
      */
-    void publish(String channel, String message);
+    void publish(String channel, String message, L2PubSubMode mode);
 
     /**
-     * Subscribes to a channel to receive messages.
+     * Subscribes using the requested Redis Pub/Sub routing mode.
      *
      * @param channel  the Pub/Sub channel
      * @param listener the listener to handle incoming messages
+     * @param mode     the Pub/Sub routing mode
      * @return a subscription object to manage the connection
      */
-    CacheMessageSubscription subscribe(String channel, CacheMessageListener listener);
+    CacheMessageSubscription subscribe(
+            String channel,
+            CacheMessageListener listener,
+            L2PubSubMode mode);
 
     /**
      * Evaluates a Lua script on the L2 cache server.
@@ -84,4 +100,14 @@ public interface L2Provider {
      * @return the result of the script evaluation
      */
     Object eval(String script, List<String> keys, List<String> args);
+
+    /**
+     * Returns a distributed reentrant lock backed by the L2 provider.
+     *
+     * @param name the lock name
+     * @return a distributed reentrant lock handle
+     */
+    default L2ReentrantLock getLock(String name) {
+        throw new UnsupportedOperationException("L2 distributed reentrant lock is not supported by this provider");
+    }
 }

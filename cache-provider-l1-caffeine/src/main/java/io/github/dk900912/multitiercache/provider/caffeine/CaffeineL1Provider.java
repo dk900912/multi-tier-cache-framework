@@ -77,10 +77,10 @@ public class CaffeineL1Provider implements L1Provider {
             builder.recordStats();
         }
         if (fineGrainedExpiry != null) {
-            if (expireAfterWrite != null || expireAfterAccess != null) {
-                LOGGER.warn("FineGrainedExpiry is configured, the global expireAfterWrite/Access will be ignored.");
+            if (expireAfterAccess != null) {
+                LOGGER.warn("FineGrainedExpiry is configured; global expireAfterAccess is ignored.");
             }
-            builder.expireAfter(adaptExpiry(fineGrainedExpiry));
+            builder.expireAfter(adaptExpiry(fineGrainedExpiry, expireAfterWrite));
         } else {
             if (expireAfterWrite != null) {
                 builder.expireAfterWrite(expireAfterWrite);
@@ -93,23 +93,44 @@ public class CaffeineL1Provider implements L1Provider {
         this.cache = builder.build();
     }
 
-    private Expiry<String, Object> adaptExpiry(FineGrainedExpiry<String, Object> fineGrainedExpiry) {
+    private Expiry<String, Object> adaptExpiry(
+            FineGrainedExpiry<String, Object> fineGrainedExpiry,
+            Duration expireAfterWrite) {
+        long writeExpiryCapNanos = toSaturatedNanos(expireAfterWrite);
         return new Expiry<>() {
             @Override
             public long expireAfterCreate(String key, Object value, long currentTime) {
-                return fineGrainedExpiry.expireAfterCreate(key, value, currentTime);
+                return Math.min(
+                        fineGrainedExpiry.expireAfterCreate(key, value, currentTime),
+                        writeExpiryCapNanos);
             }
 
             @Override
             public long expireAfterUpdate(String key, Object value, long currentTime, long currentDuration) {
-                return fineGrainedExpiry.expireAfterUpdate(key, value, currentTime, currentDuration);
+                return Math.min(
+                        fineGrainedExpiry.expireAfterUpdate(key, value, currentTime, currentDuration),
+                        writeExpiryCapNanos);
             }
 
             @Override
             public long expireAfterRead(String key, Object value, long currentTime, long currentDuration) {
-                return fineGrainedExpiry.expireAfterRead(key, value, currentTime, currentDuration);
+                // Never allow a read to extend the deadline established by create/update.
+                return Math.min(
+                        fineGrainedExpiry.expireAfterRead(key, value, currentTime, currentDuration),
+                        currentDuration);
             }
         };
+    }
+
+    private static long toSaturatedNanos(Duration duration) {
+        if (duration == null) {
+            return Long.MAX_VALUE;
+        }
+        try {
+            return duration.toNanos();
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
     }
 
     @Override
@@ -144,17 +165,8 @@ public class CaffeineL1Provider implements L1Provider {
         }
         CacheStats stats = cache.stats();
         L1CacheStats snapshot = new L1CacheStats();
-        snapshot.setRequestCount(stats.requestCount());
         snapshot.setHitCount(stats.hitCount());
-        snapshot.setHitRate(stats.hitRate());
         snapshot.setMissCount(stats.missCount());
-        snapshot.setMissRate(stats.missRate());
-        snapshot.setLoadCount(stats.loadCount());
-        snapshot.setLoadSuccessCount(stats.loadSuccessCount());
-        snapshot.setLoadFailureCount(stats.loadFailureCount());
-        snapshot.setLoadFailureRate(stats.loadFailureRate());
-        snapshot.setTotalLoadTime(stats.totalLoadTime());
-        snapshot.setAverageLoadPenalty(stats.averageLoadPenalty());
         snapshot.setEvictionCount(stats.evictionCount());
         return snapshot;
     }

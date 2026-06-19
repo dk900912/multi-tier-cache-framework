@@ -22,6 +22,7 @@ import java.util.Base64;
 public final class CacheKeyspace {
 
     private static final String DATA_PREFIX = "mtc:data:";
+    private static final String LOAD_LOCK_PREFIX = "mtc:load:";
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
         try {
@@ -42,6 +43,11 @@ public final class CacheKeyspace {
     public static String dataKey(String businessKey) {
         String identifier = identifier(businessKey);
         return DATA_PREFIX + "{" + identifier + "}";
+    }
+
+    public static String loadLockKey(CacheKey businessKey) {
+        String identifier = identifier(businessKey.toKeyString());
+        return LOAD_LOCK_PREFIX + "{" + identifier + "}";
     }
 
     public static String identifier(String businessKey) {

@@ -15,4 +15,11 @@ public interface CacheMessageListener {
      * @param message the message payload
      */
     void onMessage(String channel, String message);
+
+    /**
+     * Invoked when the provider detects that Pub/Sub delivery became unreliable or recovered.
+     * The default implementation preserves lambda and existing listener compatibility.
+     */
+    default void onDeliveryEvent(CacheMessageDeliveryEvent event) {
+    }
 }

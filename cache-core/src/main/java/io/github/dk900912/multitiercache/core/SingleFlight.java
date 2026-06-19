@@ -45,15 +45,25 @@ public final class SingleFlight {
             throw recursiveLoadFailure(key);
         }
 
-        // 1. Atomically compute or retrieve the flight to collapse concurrent requests
-        Flight flight = flights.computeIfAbsent(key, k -> {
-            CompletableFuture<Object> future = new CompletableFuture<>();
-            Flight newFlight = new Flight(future);
-
-            // Asynchronously execute the loader so that the owner thread is bound by the timeout contract
-            executor.execute(() -> runLoader(k, loader, newFlight));
-            return newFlight;
-        });
+        // Publish the candidate before starting its task. Starting work from inside a
+        // computeIfAbsent mapping function can let an eager executor recursively mutate
+        // the same map entry before ConcurrentHashMap has finished publishing it.
+        Flight candidate = new Flight(new CompletableFuture<>());
+        Flight existing = flights.putIfAbsent(key, candidate);
+        Flight flight;
+        if (existing == null) {
+            flight = candidate;
+            try {
+                // Execute separately so only the successfully published owner starts the loader.
+                executor.execute(() -> runLoader(key, loader, candidate));
+            } catch (RuntimeException | Error submissionFailure) {
+                flights.remove(key, candidate);
+                candidate.result().completeExceptionally(submissionFailure);
+                throw submissionFailure;
+            }
+        } else {
+            flight = existing;
+        }
 
         // 2. Symmetrically await and retrieve the result for both owner and waiters
         try {
@@ -74,21 +84,33 @@ public final class SingleFlight {
     private <T> void runLoader(String key, FlightLoader<T> loader, Flight flight) {
         Set<String> loadingKeys = LOADING_KEYS.get();
         if (!loadingKeys.add(key)) {
-            flight.result().completeExceptionally(recursiveLoadFailure(key));
+            completeFlight(key, flight, null, recursiveLoadFailure(key));
             return;
         }
 
+        Object value = null;
+        Throwable failure = null;
         try {
-            T value = loader.load();
-            flight.result().complete(value);
+            value = loader.load();
         } catch (Throwable e) {
-            flight.result().completeExceptionally(e);
+            failure = e;
         } finally {
             loadingKeys.remove(key);
             if (loadingKeys.isEmpty()) {
                 LOADING_KEYS.remove();
             }
-            flights.remove(key, flight);
+        }
+        completeFlight(key, flight, value, failure);
+    }
+
+    private void completeFlight(String key, Flight flight, Object value, Throwable failure) {
+        // Remove first so a request arriving after completion never observes a stale result.
+        // Conditional removal prevents a timed-out older owner from deleting a newer flight.
+        flights.remove(key, flight);
+        if (failure == null) {
+            flight.result().complete(value);
+        } else {
+            flight.result().completeExceptionally(failure);
         }
     }
 

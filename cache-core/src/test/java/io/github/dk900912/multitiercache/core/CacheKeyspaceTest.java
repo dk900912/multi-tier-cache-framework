@@ -22,6 +22,20 @@ class CacheKeyspaceTest {
     }
 
     @Test
+    void shouldCreateOpaqueLoadLockKeyWithSameHashTagAsDataKey() {
+        CacheKey businessKey = CacheKey.simple("tenant-a:user:3");
+        String identifier = CacheKeyspace.identifier(businessKey.toKeyString());
+
+        String loadLockKey = CacheKeyspace.loadLockKey(businessKey);
+
+        assertEquals("mtc:load:{" + identifier + "}", loadLockKey);
+        assertFalse(loadLockKey.contains(businessKey.toKeyString()));
+        assertEquals(
+                CacheKeyspace.dataKey(businessKey).toKeyString().replace("mtc:data:", ""),
+                loadLockKey.replace("mtc:load:", ""));
+    }
+
+    @Test
     void shouldNotLeakRawBusinessKeyIntoRedisKeys() {
         String businessKey = "tenant-a:user:{sensitive}:name=Sun Xiaoqin\nmobile=13800000000";
 

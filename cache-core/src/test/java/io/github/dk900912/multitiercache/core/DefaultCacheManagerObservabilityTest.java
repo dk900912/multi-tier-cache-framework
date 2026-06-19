@@ -1,7 +1,6 @@
 package io.github.dk900912.multitiercache.core;
 
 import io.github.dk900912.multitiercache.api.CacheKey;
-import io.github.dk900912.multitiercache.api.CacheMessageRepository;
 import io.github.dk900912.multitiercache.api.CacheMessageSubscription;
 import io.github.dk900912.multitiercache.api.CacheMonitor;
 import io.github.dk900912.multitiercache.api.model.CacheConfig;
@@ -11,6 +10,7 @@ import io.github.dk900912.multitiercache.api.model.CacheRuntimeStats;
 import io.github.dk900912.multitiercache.codec.JacksonCacheCodec;
 import io.github.dk900912.multitiercache.spi.CacheCodec;
 import io.github.dk900912.multitiercache.spi.L1Provider;
+import io.github.dk900912.multitiercache.spi.L2PubSubMode;
 import io.github.dk900912.multitiercache.spi.L2Provider;
 import org.junit.jupiter.api.Test;
 
@@ -38,7 +38,6 @@ class DefaultCacheManagerObservabilityTest {
                 config,
                 l1Provider,
                 new DisabledL2Provider(),
-                new NoopRepository(),
                 codec,
                 new SingleFlight()
         );
@@ -60,20 +59,15 @@ class DefaultCacheManagerObservabilityTest {
         assertEquals(1, loaderCalls.get());
 
         CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
-        assertEquals(1L, stats.getL1Hits());
-        assertEquals(2L, stats.getL1Misses());
-        assertEquals(0L, stats.getL2Hits());
-        assertEquals(0L, stats.getL2Misses());
-        assertEquals(0L, stats.getL2ReadFailures());
-        assertEquals(1L, stats.getLoaderCalls());
-        assertEquals(1L, stats.getL1BackfillApplied());
-        assertEquals(0L, stats.getL2ReadApplyAccepted());
-        assertEquals(0L, stats.getL2ReadApplyRejected());
-        assertEquals(0L, stats.getL2ReadApplyFailures());
-        assertEquals(0L, stats.getL2MutationApplyAccepted());
-        assertEquals(0L, stats.getL2MutationApplyRejected());
-        assertEquals(0L, stats.getL2MutationApplyFailures());
-        assertEquals(0L, stats.getPubSubMessagesReceived());
+        assertEquals(1L, stats.getL1HitCount());
+        assertEquals(2L, stats.getL1MissCount());
+        assertEquals(0L, stats.getL2HitCount());
+        assertEquals(0L, stats.getL2MissCount());
+        assertEquals(0L, stats.getL2ReadPathFailureCount());
+        assertEquals(1L, stats.getOriginLoadCount());
+        assertEquals(0L, stats.getPenetrationLoadCount());
+        assertEquals(0L, stats.getL2MutationRejectedCount());
+        assertEquals(0L, stats.getL2MutationFailureCount());
     }
 
     @Test
@@ -89,7 +83,6 @@ class DefaultCacheManagerObservabilityTest {
                 config,
                 new DisabledL1Provider(),
                 l2Provider,
-                new NoopRepository(),
                 codec,
                 new SingleFlight()
         );
@@ -112,20 +105,15 @@ class DefaultCacheManagerObservabilityTest {
         assertNull(cacheManager.getMonitor().getL1CacheStats(), "L1 stats should be unavailable when L1 is disabled");
 
         CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
-        assertEquals(0L, stats.getL1Hits());
-        assertEquals(0L, stats.getL1Misses());
-        assertEquals(1L, stats.getL2Hits());
-        assertEquals(2L, stats.getL2Misses());
-        assertEquals(0L, stats.getL2ReadFailures());
-        assertEquals(1L, stats.getLoaderCalls());
-        assertEquals(0L, stats.getL1BackfillApplied());
-        assertEquals(1L, stats.getL2ReadApplyAccepted());
-        assertEquals(0L, stats.getL2ReadApplyRejected());
-        assertEquals(0L, stats.getL2ReadApplyFailures());
-        assertEquals(0L, stats.getL2MutationApplyAccepted());
-        assertEquals(0L, stats.getL2MutationApplyRejected());
-        assertEquals(0L, stats.getL2MutationApplyFailures());
-        assertEquals(0L, stats.getPubSubMessagesReceived());
+        assertEquals(0L, stats.getL1HitCount());
+        assertEquals(0L, stats.getL1MissCount());
+        assertEquals(1L, stats.getL2HitCount());
+        assertEquals(2L, stats.getL2MissCount());
+        assertEquals(0L, stats.getL2ReadPathFailureCount());
+        assertEquals(1L, stats.getOriginLoadCount());
+        assertEquals(0L, stats.getPenetrationLoadCount());
+        assertEquals(0L, stats.getL2MutationRejectedCount());
+        assertEquals(0L, stats.getL2MutationFailureCount());
     }
 
     @Test
@@ -142,7 +130,6 @@ class DefaultCacheManagerObservabilityTest {
                 config,
                 l1Provider,
                 l2Provider,
-                new NoopRepository(),
                 codec,
                 new SingleFlight()
         );
@@ -173,41 +160,43 @@ class DefaultCacheManagerObservabilityTest {
         CacheMonitor monitor = cacheManager.getMonitor();
         CacheRuntimeStats stats = monitor.getRuntimeStats();
 
-        assertEquals(2L, stats.getL1Hits());
-        assertEquals(2L, stats.getL1Misses());
-        assertEquals(0L, stats.getL2Hits());
-        assertEquals(2L, stats.getL2Misses());
-        assertEquals(1L, stats.getLoaderCalls());
-        assertEquals(1L, stats.getLoaderValueCalls());
-        assertEquals(0L, stats.getLoaderPenetrationCalls());
-        assertEquals(1L, stats.getL1BackfillApplied());
-        assertEquals(0L, stats.getL1BackfillSkipped());
-        assertEquals(1L, stats.getL1InvalidationsApplied());
-        assertEquals(0L, stats.getL1InvalidationsSkipped());
-        assertEquals(1L, stats.getL2ReadApplyAccepted());
-        assertEquals(0L, stats.getL2ReadApplyRejected());
-        assertEquals(0L, stats.getL2ReadApplyFailures());
-        assertEquals(1L, stats.getL2MutationApplyAccepted());
-        assertEquals(1L, stats.getL2MutationApplyRejected());
-        assertEquals(0L, stats.getL2MutationApplyFailures());
-        assertEquals(0L, stats.getCompensationSaveSuccesses());
-        assertEquals(0L, stats.getCompensationSaveFailures());
-        assertEquals(0L, stats.getPubSubMessagesReceived());
+        assertEquals(2L, stats.getL1HitCount());
+        assertEquals(2L, stats.getL1MissCount());
+        assertEquals(0L, stats.getL2HitCount());
+        assertEquals(2L, stats.getL2MissCount());
+        assertEquals(1L, stats.getOriginLoadCount());
+        assertEquals(0L, stats.getPenetrationLoadCount());
+        assertEquals(1L, stats.getL2MutationRejectedCount());
+        assertEquals(0L, stats.getL2MutationFailureCount());
     }
 
-    private static final class NoopRepository implements CacheMessageRepository {
-        @Override
-        public void save(CacheMessage<?> message) {
-        }
+    @Test
+    void shouldCountPenetrationLoadsWithoutDerivedValueCounter() {
+        CacheConfig config = new CacheConfig();
+        config.getL2().setEnabled(false);
+        config.getCodec().setTrustedPackages(List.of("java.lang", "io.github.dk900912"));
 
-        @Override
-        public List<CacheMessage<?>> fetchUnprocessed(int limit) {
-            return List.of();
-        }
+        CacheCodec codec = new JacksonCacheCodec();
+        codec.initialize(config);
+        DefaultCacheManager cacheManager = new DefaultCacheManager(
+                config,
+                new InMemoryL1Provider(),
+                new DisabledL2Provider(),
+                codec,
+                new SingleFlight()
+        );
 
-        @Override
-        public void markProcessed(String key, Long version) {
-        }
+        CacheKey key = CacheKey.simple("metrics:penetration:user:404");
+        String first = cacheManager.get(key,
+                () -> CacheLoadResult.<String>penetration(Duration.ofMinutes(1)));
+        String second = cacheManager.get(key,
+                () -> CacheLoadResult.of("unexpected", 1L, Duration.ofMinutes(1)));
+
+        assertNull(first);
+        assertNull(second);
+        CacheRuntimeStats stats = cacheManager.getMonitor().getRuntimeStats();
+        assertEquals(1L, stats.getOriginLoadCount());
+        assertEquals(1L, stats.getPenetrationLoadCount());
     }
 
     private static final class InMemoryL1Provider implements L1Provider {
@@ -275,6 +264,11 @@ class DefaultCacheManagerObservabilityTest {
 
     private static final class DisabledL2Provider implements L2Provider {
         @Override
+        public void initialize(CacheConfig.L2Config config) {
+            throw new AssertionError("L2 should be disabled");
+        }
+
+        @Override
         public String get(CacheKey key) {
             throw new AssertionError("L2 should be disabled");
         }
@@ -290,12 +284,12 @@ class DefaultCacheManagerObservabilityTest {
         }
 
         @Override
-        public void publish(String channel, String message) {
+        public void publish(String channel, String message, L2PubSubMode mode) {
             throw new AssertionError("L2 should be disabled");
         }
 
         @Override
-        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener) {
+        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener, L2PubSubMode mode) {
             throw new AssertionError("L2 should be disabled");
         }
 
@@ -315,6 +309,10 @@ class DefaultCacheManagerObservabilityTest {
         }
 
         @Override
+        public void initialize(CacheConfig.L2Config config) {
+        }
+
+        @Override
         public String get(CacheKey key) {
             return values.get(key.toKeyString());
         }
@@ -330,11 +328,11 @@ class DefaultCacheManagerObservabilityTest {
         }
 
         @Override
-        public void publish(String channel, String message) {
+        public void publish(String channel, String message, L2PubSubMode mode) {
         }
 
         @Override
-        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener) {
+        public CacheMessageSubscription subscribe(String channel, io.github.dk900912.multitiercache.api.CacheMessageListener listener, L2PubSubMode mode) {
             return () -> {
             };
         }

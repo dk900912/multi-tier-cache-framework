@@ -5,7 +5,7 @@ import io.github.dk900912.multitiercache.api.model.CacheMessage;
 /**
  * Processor for handling cache mutation messages.
  * <p>
- * Responsible for applying mutations (e.g., from L2 Pub/Sub or compensation replayer) to the local L1 cache.
+ * Responsible for applying mutations (for example, from L2 Pub/Sub) to the local L1 cache.
  * </p>
  *
  * @author dukui

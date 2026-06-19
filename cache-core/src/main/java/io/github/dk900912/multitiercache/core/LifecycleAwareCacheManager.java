@@ -76,19 +76,20 @@ final class LifecycleAwareCacheManager implements CacheManager {
             return;
         }
 
-        boolean delegateStarted = false;
-        int startedLifecycleManagers = 0;
+        boolean delegateBootstrapAttempted = false;
+        int attemptedLifecycleManagers = 0;
         try {
+            delegateBootstrapAttempted = true;
             delegate.bootstrap();
-            delegateStarted = true;
             for (LifecycleManager lifecycleManager : lifecycleManagers) {
+                attemptedLifecycleManagers++;
                 lifecycleManager.bootstrap();
-                startedLifecycleManagers++;
             }
             lifecycleStateMachine.markStarted();
         } catch (Exception e) {
-            rollbackBootstrap(delegateStarted, startedLifecycleManagers, e);
+            rollbackBootstrap(delegateBootstrapAttempted, attemptedLifecycleManagers, e);
             lifecycleStateMachine.markBootstrapFailed();
+            lifecycleStateMachine.beginShutdown();
             throw e;
         }
     }
@@ -109,12 +110,15 @@ final class LifecycleAwareCacheManager implements CacheManager {
         }
     }
 
-    private void rollbackBootstrap(boolean delegateStarted, int startedLifecycleManagers, Exception bootstrapFailure) {
+    private void rollbackBootstrap(
+            boolean delegateBootstrapAttempted,
+            int attemptedLifecycleManagers,
+            Exception bootstrapFailure) {
         RuntimeException rollbackFailure = null;
-        for (int i = startedLifecycleManagers - 1; i >= 0; i--) {
+        for (int i = attemptedLifecycleManagers - 1; i >= 0; i--) {
             rollbackFailure = shutdownLifecycleManager(lifecycleManagers[i], rollbackFailure);
         }
-        if (delegateStarted) {
+        if (delegateBootstrapAttempted) {
             rollbackFailure = shutdownDelegate(rollbackFailure);
         }
         if (rollbackFailure != null) {

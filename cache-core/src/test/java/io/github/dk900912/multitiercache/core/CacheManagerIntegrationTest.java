@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -79,6 +80,24 @@ class CacheManagerIntegrationTest {
     }
 
     @Test
+    void luaShouldRejectInvalidTtlWithoutWritingPermanentValue() {
+        JedisL2Provider provider = new JedisL2Provider();
+        provider.initialize(newCacheConfig().getL2());
+        String redisKey = "{integration:invalid-ttl:" + UUID.randomUUID() + "}";
+        CacheKey key = () -> redisKey;
+        try {
+            provider.delete(key);
+            assertThrows(RuntimeException.class, () -> provider.eval(
+                    CacheLuaScripts.APPLY_MESSAGE_LUA_SCRIPT,
+                    List.of(redisKey),
+                    List.of("{}", "0", "insert", "1", "unused", "0")));
+            assertNull(provider.get(key));
+        } finally {
+            provider.close();
+        }
+    }
+
+    @Test
     void testHighConcurrencySingleFlight() throws InterruptedException {
         int threads = 50;
         ExecutorService executor = Executors.newFixedThreadPool(threads);
@@ -121,6 +140,50 @@ class CacheManagerIntegrationTest {
         }
         // The most important assertion: SingleFlight prevented cache breakdown
         assertEquals(1, loaderCalls.get(), "Loader should have been called exactly once despite 50 concurrent requests");
+    }
+
+    @Test
+    void distributedBreakdownProtectionShouldCollapseLoadsAcrossManagersForEveryProvider() throws Exception {
+        for (CacheConfig.L2ProviderType providerType : List.of(
+                CacheConfig.L2ProviderType.JEDIS,
+                CacheConfig.L2ProviderType.LETTUCE,
+                CacheConfig.L2ProviderType.REDISSON)) {
+            CacheConfig firstConfig = distributedBreakdownConfig(providerType);
+            CacheConfig secondConfig = distributedBreakdownConfig(providerType);
+            CacheManager first = createManager(firstConfig);
+            CacheManager second = createManager(secondConfig);
+            CacheKey key = CacheKey.simple("integration:global-load:" + providerType + ":" + UUID.randomUUID());
+            AtomicInteger loaderCalls = new AtomicInteger();
+            CountDownLatch loaderStarted = new CountDownLatch(1);
+            CountDownLatch allowLoaderToFinish = new CountDownLatch(1);
+
+            try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+                Future<String> owner = executor.submit(() -> first.get(key, () -> {
+                    loaderCalls.incrementAndGet();
+                    loaderStarted.countDown();
+                    awaitUninterruptibly(allowLoaderToFinish);
+                    return CacheLoadResult.of("global-value", 1L, Duration.ofMinutes(2));
+                }));
+
+                assertTrue(loaderStarted.await(5, TimeUnit.SECONDS));
+                Future<String> contender = executor.submit(() -> second.get(key, () -> {
+                    loaderCalls.incrementAndGet();
+                    return CacheLoadResult.of("unexpected", 2L, Duration.ofMinutes(2));
+                }));
+
+                waitUntil(
+                        () -> second.getMonitor().getRuntimeStats().getDistributedLockAttemptCount() == 1L,
+                        providerType + " contender did not attempt the distributed load lock");
+                sleepUninterruptibly(Duration.ofMillis(700));
+                allowLoaderToFinish.countDown();
+
+                assertEquals("global-value", owner.get(5, TimeUnit.SECONDS));
+                assertEquals("global-value", contender.get(5, TimeUnit.SECONDS));
+                assertEquals(1, loaderCalls.get(), providerType + " should execute one global loader");
+            } finally {
+                allowLoaderToFinish.countDown();
+            }
+        }
     }
 
     public static class ComplexEntity {
@@ -728,10 +791,61 @@ class CacheManagerIntegrationTest {
     }
 
     private CacheManager createManager() {
-        CacheManager manager = CacheManagerFactory.create(newCacheConfig());
+        return createManager(newCacheConfig());
+    }
+
+    private CacheManager createManager(CacheConfig config) {
+        CacheManager manager = CacheManagerFactory.create(config);
         manager.bootstrap();
         cacheManagers.add(manager);
         return manager;
+    }
+
+    private CacheConfig distributedBreakdownConfig(CacheConfig.L2ProviderType providerType) {
+        CacheConfig config = newCacheConfig();
+        config.getL1().setEnabled(false);
+        config.getL2().setProvider(providerType);
+        config.getL2().setLockWatchdogTimeout(Duration.ofMillis(300));
+        config.getOriginLoadLimiter().setLocalLoadWaitTimeout(Duration.ofSeconds(5));
+        config.getOriginLoadLimiter().setGlobalLoadWaitTimeout(Duration.ofSeconds(3));
+        config.getOriginLoadLimiter().setOriginLoadLimitMode(
+                CacheConfig.OriginLoadLimitMode.GLOBAL);
+        return config;
+    }
+
+    private static void sleepUninterruptibly(Duration duration) {
+        long deadline = System.nanoTime() + duration.toNanos();
+        boolean interrupted = false;
+        while (true) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) {
+                break;
+            }
+            try {
+                TimeUnit.NANOSECONDS.sleep(remaining);
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                latch.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private CacheConfig newCacheConfig() {
@@ -741,7 +855,7 @@ class CacheManagerIntegrationTest {
         config.getL2().setUsername("dk900912");
         config.getL2().setPassword("qwe@1234");
         config.getL2().setHosts(List.of("127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"));
-        config.getCacheMiss().setBackfillTtl(Duration.ofMinutes(2));
+        config.getLoadPolicy().setBackfillTtl(Duration.ofMinutes(2));
         config.getCodec().setTrustedPackages(List.of("io.github.dk900912"));
         return config;
     }
