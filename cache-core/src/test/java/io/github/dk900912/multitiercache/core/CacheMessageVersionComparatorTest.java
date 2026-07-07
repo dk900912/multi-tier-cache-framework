@@ -32,4 +32,13 @@ class CacheMessageVersionComparatorTest {
 
         assertTrue(CacheMessageVersionComparator.shouldReplace(delete, value));
     }
+
+    @Test
+    void shouldRejectDuplicateDeleteTombstone() {
+        CacheMessage<String> tombstone = new CacheMessage<>("user:1", null, 8L, CacheMessageType.DELETE, 1_000L);
+        CacheMessage<String> duplicateDelete = new CacheMessage<>("user:1", null, 8L, CacheMessageType.DELETE, 1_000L);
+
+        assertFalse(CacheMessageVersionComparator.shouldReplace(duplicateDelete, tombstone));
+        assertFalse(CacheMessageVersionComparator.shouldInvalidate(tombstone, duplicateDelete));
+    }
 }

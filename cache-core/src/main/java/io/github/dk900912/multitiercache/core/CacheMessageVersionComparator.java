@@ -48,6 +48,9 @@ public final class CacheMessageVersionComparator {
         }
 
         if (incoming.getType().isDelete()) {
+            if (current.getType().isDelete()) {
+                return incoming.getVersion() > current.getVersion();
+            }
             return incoming.getVersion() >= current.getVersion();
         }
         if (current.getType().isDelete()) {

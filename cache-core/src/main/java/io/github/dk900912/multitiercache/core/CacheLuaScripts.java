@@ -59,6 +59,12 @@ public final class CacheLuaScripts {
             end
 
             if incomingType == 'delete' then
+                if currentType == 'delete' then
+                    if incomingVersion > currentVersion then
+                        return writeValue()
+                    end
+                    return 0
+                end
                 if incomingVersion >= currentVersion then
                     return writeValue()
                 end
