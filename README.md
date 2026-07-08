@@ -56,7 +56,7 @@
 
 ## 快速上手
 
-当前版本：`1.0.0-M5`
+当前版本：`1.0.0-M6`
 
 ### 1. 引入依赖
 
@@ -68,7 +68,7 @@
     <dependency>
       <groupId>io.github.dk900912</groupId>
       <artifactId>multi-tier-cache-framework</artifactId>
-      <version>1.0.0-M5</version>
+      <version>1.0.0-M6</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>

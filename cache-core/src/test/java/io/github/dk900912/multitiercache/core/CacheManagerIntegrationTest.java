@@ -13,11 +13,17 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.Socket;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -208,6 +214,30 @@ class CacheManagerIntegrationTest {
         public void setTags(List<String> tags) { this.tags = tags; }
     }
 
+    public static class LargeIntegrationEntity {
+        @CacheVersion
+        public long version;
+        public String name;
+        public Instant createdAt;
+        public Optional<String> note;
+        public List<LargeIntegrationChild> children;
+        public Map<String, Object> metadata;
+
+        public LargeIntegrationEntity() {
+        }
+    }
+
+    public static class LargeIntegrationChild {
+        public String id;
+        public int rank;
+        public BigDecimal score;
+        public List<String> aliases;
+        public Map<String, Object> attributes;
+
+        public LargeIntegrationChild() {
+        }
+    }
+
     @Test
     void testComplexObjectSerializationAndMutation() throws InterruptedException {
         CacheKey key = CacheKey.simple("integration:test:complex:" + UUID.randomUUID());
@@ -280,6 +310,44 @@ class CacheManagerIntegrationTest {
         // Therefore, loaderCalls remains 0, and cachedAfterEvict should be null.
         assertEquals(0, loaderCalls.get(), "Loader should NOT be called because evict writes a tombstone");
         assertNull(cachedAfterEvict, "Evicted key should return null due to tombstone");
+    }
+
+    @Test
+    void testLargeComplexObjectRoundTripThroughRedisCluster() throws Exception {
+        CacheManager otherNode = createManager();
+        CacheKey key = CacheKey.simple("integration:test:large-complex:" + UUID.randomUUID());
+
+        LargeIntegrationEntity inserted = createLargeIntegrationEntity(1L, "large-primary", 150);
+        cacheManager.insert(key, inserted, inserted.version, Duration.ofMinutes(5));
+        waitUntil(
+                () -> l2MessageMatches(key, CacheMessageType.INSERT, inserted.version),
+                "large complex insert should reach L2");
+
+        AtomicInteger loaderCalls = new AtomicInteger();
+        LargeIntegrationEntity fromOtherNode = otherNode.get(key, () -> {
+            loaderCalls.incrementAndGet();
+            return CacheLoadResult.of(createLargeIntegrationEntity(999L, "unexpected", 1), 999L, Duration.ofMinutes(5));
+        });
+        assertEquals(0, loaderCalls.get(), "large complex value should be read from L2, not DB");
+        assertLargeIntegrationEntity(inserted, fromOtherNode);
+
+        LargeIntegrationEntity updated = createLargeIntegrationEntity(2L, "large-updated", 160);
+        cacheManager.update(key, updated, updated.version, Duration.ofMinutes(5));
+        waitUntil(
+                () -> l2MessageMatches(key, CacheMessageType.UPDATE, updated.version),
+                "large complex update should reach L2");
+
+        waitUntil(() -> {
+            LargeIntegrationEntity latest = otherNode.get(key, () -> {
+                loaderCalls.incrementAndGet();
+                return CacheLoadResult.of(createLargeIntegrationEntity(999L, "unexpected", 1), 999L, Duration.ofMinutes(5));
+            });
+            return latest != null
+                    && latest.version == updated.version
+                    && updated.name.equals(latest.name)
+                    && latest.children.size() == updated.children.size();
+        }, "large complex value should converge across nodes after Pub/Sub invalidation");
+        assertEquals(0, loaderCalls.get(), "large complex update should not fall back to DB");
     }
 
     @Test
@@ -775,6 +843,62 @@ class CacheManagerIntegrationTest {
             assertNull(cached);
             assertEquals(0, loaderCalls.get());
         }
+    }
+
+    private LargeIntegrationEntity createLargeIntegrationEntity(long version, String name, int childCount) {
+        LargeIntegrationEntity entity = new LargeIntegrationEntity();
+        entity.version = version;
+        entity.name = name + "-" + "payload".repeat(256);
+        entity.createdAt = Instant.parse("2026-07-07T12:00:00Z").plusSeconds(version);
+        entity.note = Optional.of("note-" + version + "-" + "content".repeat(128));
+        entity.children = new ArrayList<>(childCount);
+        entity.metadata = new LinkedHashMap<>();
+        entity.metadata.put("version", version);
+        entity.metadata.put("amount", new BigDecimal("12345678901234567890.123456789"));
+        entity.metadata.put("createdAt", entity.createdAt);
+        entity.metadata.put("traceId", UUID.nameUUIDFromBytes(("trace-" + version).getBytes()));
+        entity.metadata.put("source", URI.create("https://example.test/cache/" + version));
+        entity.metadata.put("flags", new ArrayList<>(List.of("redis", "cluster", "large")));
+
+        for (int i = 0; i < childCount; i++) {
+            LargeIntegrationChild child = new LargeIntegrationChild();
+            child.id = "child-" + version + "-" + i;
+            child.rank = i;
+            child.score = BigDecimal.valueOf(version * 10_000L + i, 4);
+            child.aliases = List.of("alias-" + i, "alias-cn-" + i);
+            child.attributes = new LinkedHashMap<>();
+            child.attributes.put("bucket", "b-" + i % 17);
+            child.attributes.put("visibleAt", entity.createdAt.plusSeconds(i));
+            child.attributes.put("weight", BigDecimal.valueOf(i * 1000L + 9, 3));
+            child.attributes.put("labels", new ArrayList<>(List.of("l1", "l2", "l" + i)));
+            entity.children.add(child);
+        }
+        return entity;
+    }
+
+    private void assertLargeIntegrationEntity(LargeIntegrationEntity expected, LargeIntegrationEntity actual) {
+        assertNotNull(actual);
+        assertEquals(expected.version, actual.version);
+        assertEquals(expected.name, actual.name);
+        assertEquals(expected.createdAt, actual.createdAt);
+        assertEquals(expected.note, actual.note);
+        assertEquals(expected.children.size(), actual.children.size());
+        assertEquals(expected.metadata.get("amount"), actual.metadata.get("amount"));
+        assertEquals(expected.metadata.get("createdAt"), actual.metadata.get("createdAt"));
+        assertEquals(expected.metadata.get("traceId"), actual.metadata.get("traceId"));
+        assertEquals(expected.metadata.get("source"), actual.metadata.get("source"));
+        assertEquals(expected.metadata.get("flags"), actual.metadata.get("flags"));
+
+        LargeIntegrationChild expectedLast = expected.children.getLast();
+        LargeIntegrationChild actualLast = actual.children.getLast();
+        assertEquals(expectedLast.id, actualLast.id);
+        assertEquals(expectedLast.rank, actualLast.rank);
+        assertEquals(expectedLast.score, actualLast.score);
+        assertEquals(expectedLast.aliases, actualLast.aliases);
+        assertEquals(expectedLast.attributes.get("bucket"), actualLast.attributes.get("bucket"));
+        assertEquals(expectedLast.attributes.get("visibleAt"), actualLast.attributes.get("visibleAt"));
+        assertEquals(expectedLast.attributes.get("weight"), actualLast.attributes.get("weight"));
+        assertEquals(expectedLast.attributes.get("labels"), actualLast.attributes.get("labels"));
     }
 
     private static boolean isLocalRedisClusterReachable() {

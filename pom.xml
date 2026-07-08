@@ -6,7 +6,7 @@
 
     <groupId>io.github.dk900912</groupId>
     <artifactId>multi-tier-cache-framework</artifactId>
-    <version>1.0.0-M5</version>
+    <version>1.0.0-M6</version>
     <packaging>pom</packaging>
 
     <name>multi-tier-cache-framework</name>
@@ -169,6 +169,16 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.module</groupId>
                 <artifactId>jackson-module-blackbird</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.datatype</groupId>
+                <artifactId>jackson-datatype-jdk8</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.datatype</groupId>
+                <artifactId>jackson-datatype-jsr310</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
 
